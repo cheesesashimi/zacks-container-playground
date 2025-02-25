@@ -38,7 +38,7 @@ skip_if_unavailable=False`
 	}
 }
 
-func generatingApproaches() error {
+func generateContainerfile() containerfile.ContainerfileSteps {
 	mounts := []*containerfile.Mount{
 		{
 			Type:            "bind",
@@ -65,7 +65,7 @@ func generatingApproaches() error {
 		},
 	}
 
-	steps := containerfile.ContainerfileSteps{
+	return containerfile.ContainerfileSteps{
 		&containerfile.FromStep{
 			Image: "registry.ci.openshift.org/ocp/4.18-2024-11-26-081001@sha256:7e2831f10dec594e0ee569918078b34c7c09df6f34a49b55d2271216c0ba6edc",
 		},
@@ -77,7 +77,9 @@ func generatingApproaches() error {
 			Command: "ostree container commit",
 		},
 	}
+}
 
+func buildContainerfile(steps containerfile.ContainerfileSteps) error {
 	fmt.Println("Building:")
 	fmt.Println(steps.Containerfile())
 
@@ -111,7 +113,8 @@ func generatingApproaches() error {
 }
 
 func main() {
-	if err := generatingApproaches(); err != nil {
-		panic(err)
-	}
+	cfile := generateContainerfile()
+
+	fmt.Println("Containerfile:")
+	fmt.Println(cfile.Containerfile())
 }
