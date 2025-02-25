@@ -1,4 +1,4 @@
-package main
+package command
 
 import "fmt"
 
@@ -56,12 +56,8 @@ type PodmanEnv struct {
 func (p *PodmanEnv) flag() Flag {
 	return &DoubleValueFlag{
 		Name:  "env",
-		Value: p.render(),
+		Value: fmt.Sprintf("%s=%s", p.Name, p.Value),
 	}
-}
-
-func (p *PodmanEnv) render() string {
-	return fmt.Sprintf("%s=%s", p.Name, p.Value)
 }
 
 type PodmanTag struct {
@@ -69,15 +65,14 @@ type PodmanTag struct {
 	TargetName string
 }
 
-func (p *PodmanTag) Args() []Arg {
-	return []Arg{
-		CommandName("podman"),
+func (p *PodmanTag) Command() *Command {
+	return NewCommand("podman", []Arg{
 		&Subcommand{
 			Name: "tag",
 		},
 		PositionalArg(p.Image),
 		PositionalArg(p.TargetName),
-	}
+	})
 }
 
 type PodmanPush struct {
@@ -87,7 +82,7 @@ type PodmanPush struct {
 	TLSVerify *bool
 }
 
-func (p *PodmanPush) Args() []Arg {
+func (p *PodmanPush) Command() *Command {
 	pushFlags := mapToValFlags(map[string]string{
 		"authfile": p.Authfile,
 		"format":   p.Format,
@@ -97,14 +92,13 @@ func (p *PodmanPush) Args() []Arg {
 		"tls-verify": p.TLSVerify,
 	})...)
 
-	return []Arg{
-		CommandName("podman"),
+	return NewCommand("podman", []Arg{
 		&Subcommand{
 			Name:  "push",
 			Flags: pushFlags,
 		},
 		PositionalArg(p.Image),
-	}
+	})
 }
 
 type PodmanBuild struct {
@@ -116,7 +110,7 @@ type PodmanBuild struct {
 	File         string
 }
 
-func (p *PodmanBuild) Args() []Arg {
+func (p *PodmanBuild) Command() *Command {
 	buildFlags := mapToValFlags(map[string]string{
 		"tag":    p.Tag,
 		"target": p.Target,
@@ -136,14 +130,14 @@ func (p *PodmanBuild) Args() []Arg {
 		buildCtx = "."
 	}
 
-	return []Arg{
-		CommandName("podman"),
+	return NewCommand("podman", []Arg{
 		&Subcommand{
 			Name:  "build",
 			Flags: buildFlags,
 		},
+
 		PositionalArg(buildCtx),
-	}
+	})
 }
 
 type PodmanRun struct {
@@ -161,7 +155,7 @@ type PodmanRun struct {
 	Image           string
 }
 
-func (p *PodmanRun) Args() []Arg {
+func (p *PodmanRun) Command() *Command {
 	runFlags := mapToSwitchFlags(map[string]bool{
 		"interactive": p.Interactive,
 		"tty":         p.Tty,
@@ -185,60 +179,15 @@ func (p *PodmanRun) Args() []Arg {
 
 	runFlags = append(runFlags, p.AdditionalFlags...)
 
-	out := []Arg{
-		CommandName("podman"),
+	return NewCommand("podman", append([]Arg{
 		&Subcommand{
 			Name:  "run",
 			Flags: runFlags,
 		},
 		PositionalArg(p.Image),
-	}
-
-	return append(out, p.ImageOpts...)
+	}, p.ImageOpts...))
 }
 
 type PodmanPull struct {
 	Image string
-}
-
-func mapToValFlags(valOpts map[string]string) []Flag {
-	out := []Flag{}
-
-	for name, val := range valOpts {
-		if val != "" {
-			out = append(out, &DoubleValueFlag{
-				Name:  name,
-				Value: val,
-			})
-		}
-	}
-
-	return out
-}
-
-func mapToSwitchFlags(switchOpts map[string]bool) []Flag {
-	out := []Flag{}
-
-	for name, isSet := range switchOpts {
-		if isSet {
-			out = append(out, DoubleSwitchFlag(name))
-		}
-	}
-
-	return out
-}
-
-func mapToOptSwitchFlags(optSwitchOpts map[string]*bool) []Flag {
-	out := []Flag{}
-
-	for name, val := range optSwitchOpts {
-		if val != nil {
-			out = append(out, &DoubleEqualValueFlag{
-				Name:  name,
-				Value: fmt.Sprintf("%v", *val),
-			})
-		}
-	}
-
-	return out
 }

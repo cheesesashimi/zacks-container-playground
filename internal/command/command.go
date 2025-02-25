@@ -1,4 +1,4 @@
-package main
+package command
 
 import (
 	"fmt"
@@ -8,34 +8,45 @@ import (
 
 type Command struct {
 	args []Arg
+	env  map[string]string
 }
 
-func NewCommand(args []Arg) (*Command, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("no args found")
-	}
-
-	if _, ok := args[0].(CommandName); !ok {
-		return nil, fmt.Errorf("first arg must be CommandName, got: %T", args[0])
-	}
-
+func NewCommand(name string, args []Arg) *Command {
 	return &Command{
-		args: args,
-	}, nil
+		args: append([]Arg{PositionalArg(name)}, args...),
+	}
+}
+
+func (c *Command) envVars() []string {
+	envVars := []string{}
+
+	for name, val := range c.env {
+		envVars = append(envVars, fmt.Sprintf("%s=%s", name, val))
+	}
+
+	return envVars
 }
 
 func (c *Command) String() string {
-	return strings.Join(renderArgs(c.args), " ")
+	out := append(c.envVars(), renderArgs(c.args)...)
+	return strings.Join(out, " ")
 }
 
 func (c *Command) Cmd() *exec.Cmd {
-	return exec.Command(c.args[0].Arg()[0], renderArgs(c.args[1:])...)
+	cmd := exec.Command(c.args[0].Arg()[0], renderArgs(c.args[1:])...)
+
+	if c.env == nil {
+		return cmd
+	}
+
+	cmd.Env = append(cmd.Env, c.envVars()...)
+	return cmd
 }
 
-type CommandName string
-
-func (c CommandName) Arg() []string {
-	return []string{string(c)}
+func NewCommandWithEnv(name string, args []Arg, env map[string]string) *Command {
+	cmd := NewCommand(name, args)
+	cmd.env = env
+	return cmd
 }
 
 type PositionalArg string

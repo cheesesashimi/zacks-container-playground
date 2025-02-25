@@ -1,4 +1,4 @@
-package main
+package command
 
 type P11KitExtract struct {
 	Format    string
@@ -9,7 +9,7 @@ type P11KitExtract struct {
 	DestPath  string
 }
 
-func (p *P11KitExtract) Args() []Arg {
+func (p *P11KitExtract) Command() *Command {
 	extractFlags := mapToValFlags(map[string]string{
 		"format":  p.Format,
 		"filter":  p.Filter,
@@ -21,14 +21,13 @@ func (p *P11KitExtract) Args() []Arg {
 		"overwrite": p.Overwrite,
 	})...)
 
-	return []Arg{
-		CommandName("p11-kit"),
+	return NewCommand("p11-kit", []Arg{
 		&Subcommand{
 			Name:  "extract",
 			Flags: extractFlags,
 		},
 		PositionalArg(p.DestPath),
-	}
+	})
 }
 
 type Proxy struct {
@@ -69,7 +68,7 @@ type BuildahBuild struct {
 	Volumes       []Volume
 }
 
-func (b *BuildahBuild) Args() []Arg {
+func (b *BuildahBuild) Command() *Command {
 	buildFlags := mapToValFlags(map[string]string{
 		"authfile":       b.Authfile,
 		"file":           b.File,
@@ -95,14 +94,13 @@ func (b *BuildahBuild) Args() []Arg {
 		buildCtx = "."
 	}
 
-	return []Arg{
-		CommandName("buildah"),
+	return NewCommand("buildah", []Arg{
 		&Subcommand{
 			Name:  "build",
 			Flags: buildFlags,
 		},
 		PositionalArg(buildCtx),
-	}
+	})
 }
 
 type BuildahPush struct {
@@ -115,7 +113,7 @@ type BuildahPush struct {
 	Tag           string
 }
 
-func (b *BuildahPush) Args() []Arg {
+func (b *BuildahPush) Command() *Command {
 	buildFlags := mapToValFlags(map[string]string{
 		"authfile":       b.Authfile,
 		"cert-dir":       b.CertDir,
@@ -124,12 +122,11 @@ func (b *BuildahPush) Args() []Arg {
 		"storage-driver": b.StorageDriver,
 	})
 
-	return []Arg{
-		CommandName("buildah"),
+	return NewCommand("buildah", []Arg{
 		&Subcommand{
 			Name:  "push",
 			Flags: buildFlags,
 		},
 		PositionalArg(b.Image),
-	}
+	})
 }
