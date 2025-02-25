@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/cheesesashimi/zacks-openshift-playground/internal/command"
-	"github.com/cheesesashimi/zacks-openshift-playground/internal/containerfile"
+	"github.com/cheesesashimi/zacks-container-playground/internal/command"
+	"github.com/cheesesashimi/zacks-container-playground/internal/containerfile"
 )
 
 type packageManager string

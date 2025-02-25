@@ -1,4 +1,4 @@
-module github.com/cheesesashimi/zacks-openshift-playground
+module github.com/cheesesashimi/zacks-container-playground
 
 go 1.23.2
 

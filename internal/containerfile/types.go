@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cheesesashimi/zacks-openshift-playground/internal/command"
+	"github.com/cheesesashimi/zacks-container-playground/internal/command"
 )
 
 // Top-level Containerfile object

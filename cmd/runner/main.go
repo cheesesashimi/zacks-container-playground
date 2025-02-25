@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cheesesashimi/zacks-openshift-playground/internal/command"
+	"github.com/cheesesashimi/zacks-container-playground/internal/command"
 )
 
 func podmanrun() {
