@@ -7,33 +7,55 @@ import (
 	"github.com/cheesesashimi/zacks-openshift-playground/internal/command"
 )
 
+// Top-level Containerfile object
+type Containerfile struct {
+	Stages []*Stage
+	Tag    string
+}
+
+func (c *Containerfile) String() string {
+	sb := &strings.Builder{}
+
+	for _, stage := range c.Stages {
+		fmt.Fprintln(sb, stage.Line())
+	}
+
+	return sb.String()
+}
+
+// Represents a single stage in a Containerfile, including its base image. Each
+// Containerfile must have at least one stage.
 type Stage struct {
 	Name  string
 	Image string
 	Steps []ContainerfileStep
 }
 
-type Containerfile struct {
-	Stages []*Stage
-	Tag    string
-}
+func (s *Stage) Line() string {
+	sb := &strings.Builder{}
 
-type ContainerfileSteps []ContainerfileStep
-
-func (c ContainerfileSteps) Containerfile() string {
-	out := &strings.Builder{}
-
-	for _, step := range c {
-		fmt.Fprintln(out, step.Line())
+	from := &FromStep{
+		Image: s.Image,
+		As:    s.Name,
 	}
 
-	return out.String()
+	fmt.Fprintln(sb, from.Line())
+
+	for _, step := range s.Steps {
+		fmt.Fprintln(sb, step.Line())
+	}
+
+	return sb.String()
 }
 
+// Catch-all for a given step in a Containerfile. Each *Step type must
+// implement this interface. For now, this just emits a string representation
+// of what the given step should do.
 type ContainerfileStep interface {
 	Line() string
 }
 
+// Represents a FROM statement.
 type FromStep struct {
 	Image string
 	As    string
@@ -91,13 +113,18 @@ func (m *Mount) flag() string {
 	return fmt.Sprintf("--mount=%s", strings.Join(out, ","))
 }
 
+// A Command primitive knows how to construct a CLI command given its options.
 type Command interface {
 	Command() *command.Command
 }
 
+// Chains multiple Commands together with && in between them.
 type MultiCommandRunStep struct {
-	Flags    []string
-	Mounts   []*Mount
+	// A flag is an option that gets passed to the RUN directive.
+	Flags []string
+	// A Mount is a specific --mount option that gets passed to the RUN directive.
+	Mounts []*Mount
+	// A list of commands to execute.
 	Commands []Command
 }
 
@@ -132,6 +159,7 @@ func (c *CommandRunStep) Line() string {
 	return r.Line()
 }
 
+// Represents a RUN statement.
 type RunStep struct {
 	Flags   []string
 	Mounts  []*Mount
@@ -155,6 +183,7 @@ func (r *RunStep) Line() string {
 	return strings.Join(out, " ")
 }
 
+// Chains multiple command literals together with && and runs them.
 type MultiRunStep struct {
 	Flags    []string
 	Mounts   []*Mount
@@ -171,6 +200,7 @@ func (m *MultiRunStep) Line() string {
 	return r.Line()
 }
 
+// Represents a LABEL statement.
 type LabelStep struct {
 	Key   string
 	Value string
@@ -180,11 +210,21 @@ func (l *LabelStep) Line() string {
 	return fmt.Sprintf("LABEL %s=%s", l.Key, l.Value)
 }
 
+// Represents a COPY statement.
 type CopyStep struct {
 	From  string
 	Src   string
 	Dest  string
 	Flags []string
+}
+
+// Shortcut for copying everything from the given build context into the
+// container.
+func CopyAllStep() ContainerfileStep {
+	return &CopyStep{
+		Src:  ".",
+		Dest: ".",
+	}
 }
 
 func (c *CopyStep) Line() string {
@@ -197,4 +237,28 @@ func (c *CopyStep) Line() string {
 	out = append(out, c.Flags...)
 	out = append(out, []string{c.Src, c.Dest}...)
 	return strings.Join(out, " ")
+}
+
+// Represents a WORKDIR statement.
+type WorkDirStep string
+
+func NewWorkDirStep(path string) ContainerfileStep {
+	w := WorkDirStep(path)
+	return &w
+}
+
+func (w *WorkDirStep) Line() string {
+	return fmt.Sprintf("WORKDIR %s", *w)
+}
+
+// Represents a USER statement.
+type UserStep string
+
+func NewUserStep(user string) ContainerfileStep {
+	u := UserStep(user)
+	return &u
+}
+
+func (u *UserStep) Line() string {
+	return fmt.Sprintf("USER %s", *u)
 }

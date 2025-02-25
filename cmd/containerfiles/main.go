@@ -2,119 +2,158 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/cheesesashimi/zacks-openshift-playground/internal/command"
 	"github.com/cheesesashimi/zacks-openshift-playground/internal/containerfile"
 )
 
-func getExtensionsRepoCommands(extensionPkgs []string) []containerfile.Command {
-	extRepoFilePath := "/etc/yum.repos.d/coreos-extensions.repo"
-	repoFile := `[coreos-extensions]
-enabled=1
-metadata_expire=1m
-baseurl=/tmp/mco-extensions/os-extensions-content/usr/share/rpm-ostree/extensions/
-gpgcheck=0
-skip_if_unavailable=False`
+type packageManager string
 
+const (
+	dnf    packageManager = "dnf"
+	yum    packageManager = "yum"
+	aptGet packageManager = "apt-get"
+)
+
+// Holds options applicable for all containerfiles that we generate.
+type otherContainerfileOpts struct {
+	// The base image to pull
+	baseImage string
+	// The username to create
+	username string
+	// The packages to install
+	packages []string
+	// The package manager to call for installation
+	packageManager packageManager
+}
+
+// Generates the containerfile.
+func (o *otherContainerfileOpts) containerfile() containerfile.Containerfile {
+	return containerfile.Containerfile{
+		Stages: []*containerfile.Stage{
+			// This containerfile only has a single stage.
+			{
+				Image: o.baseImage,
+				Steps: []containerfile.ContainerfileStep{
+					&containerfile.MultiCommandRunStep{
+						Commands: append(o.getPackageCommands(), &command.CommandLiteral{"useradd", o.username}),
+					},
+					containerfile.NewUserStep(o.username),
+				},
+			},
+		},
+	}
+}
+
+// Gets the appropriate package command(s) given the supplied package manager.
+func (o *otherContainerfileOpts) getPackageCommands() []containerfile.Command {
+	if o.packageManager == dnf {
+		return []containerfile.Command{
+			&command.DnfInstall{
+				Yes:      true,
+				Packages: o.packages,
+			},
+		}
+	}
+
+	if o.packageManager == aptGet {
+		return []containerfile.Command{
+			// Needs an update step before we can install packages.
+			&command.AptGetUpdate{},
+			&command.AptGetInstall{
+				Yes:      true,
+				Packages: o.packages,
+			},
+		}
+	}
+
+	if o.packageManager == yum {
+		return []containerfile.Command{
+			&command.YumInstall{
+				Yes:      true,
+				Packages: o.packages,
+			},
+		}
+	}
+
+	// Default to dnf if no other option exists.
 	return []containerfile.Command{
-		&command.Echo{
-			Content:    repoFile,
-			Escape:     true,
-			RedirectTo: extRepoFilePath,
-		},
-		&command.Chmod{
-			Path:      extRepoFilePath,
-			Mode:      "644",
-			Recursive: true,
-		},
-		&command.RpmOstreeInstall{
-			Packages: extensionPkgs,
-		},
-		&command.Delete{
-			Path: extRepoFilePath,
+		&command.DnfInstall{
+			Yes:      true,
+			Packages: o.packages,
 		},
 	}
 }
 
-func generateContainerfile() containerfile.ContainerfileSteps {
-	mounts := []*containerfile.Mount{
-		{
-			Type:            "bind",
-			From:            "registry.ci.openshift.org/ocp/4.18-2024-11-26-081001@sha256:cf24f7665d164b2e3072ddb22a3410ba802bf19d5c67638a84bc5faf4452f1fa",
-			Source:          "/",
-			Target:          "/tmp/mco-extensions/os-extensions-content",
-			BindPropagation: "rshared",
-			Opts:            "rw,z",
-		},
-		{
-			Type:   "cache",
-			Target: "/var/cache/dnf",
-			Opts:   "z",
-		},
-		{
-			Type:   "cache",
-			Target: "/go/rhel9/.cache",
-			Opts:   "z",
-		},
-		{
-			Type:   "cache",
-			Target: "/go/rhel9/pkg/mod",
-			Opts:   "z",
-		},
+// Returns the containerfiles that were templatized in the slide deck.
+func generateOtherContainerfiles() []containerfile.Containerfile {
+	items := map[string]packageManager{
+		"registry.fedoraproject.org/fedora:latest": dnf,
+		"quay.io/centos/stream:9":                  yum,
+		"ubuntu:latest":                            aptGet,
 	}
 
-	return containerfile.ContainerfileSteps{
-		&containerfile.FromStep{
-			Image: "registry.ci.openshift.org/ocp/4.18-2024-11-26-081001@sha256:7e2831f10dec594e0ee569918078b34c7c09df6f34a49b55d2271216c0ba6edc",
-		},
-		&containerfile.MultiCommandRunStep{
-			Mounts:   mounts,
-			Commands: getExtensionsRepoCommands([]string{"usbguard", "kata-containers", "kernel-rt"}),
-		},
-		&containerfile.RunStep{
-			Command: "ostree container commit",
-		},
+	out := []containerfile.Containerfile{}
+
+	for baseImage, packageManager := range items {
+		opts := otherContainerfileOpts{
+			baseImage:      baseImage,
+			packageManager: packageManager,
+			packages:       []string{"nvim", "git", "golang"},
+			username:       "zack",
+		}
+
+		out = append(out, opts.containerfile())
 	}
+
+	return out
 }
 
-func buildContainerfile(steps containerfile.ContainerfileSteps) error {
-	fmt.Println("Building:")
-	fmt.Println(steps.Containerfile())
+func generateGolangBuildContainerfile() containerfile.Containerfile {
+	baseImage := "registry.fedoraproject.org/fedora:latest"
+	workdirPath := "/go/src/github.com/cheesesashimi/zacks-openshift-helpers"
 
-	tempdir, err := os.MkdirTemp("", "")
-	if err != nil {
-		return err
+	return containerfile.Containerfile{
+		Stages: []*containerfile.Stage{
+			{
+				Name:  "builder",
+				Image: baseImage,
+				Steps: []containerfile.ContainerfileStep{
+					containerfile.NewWorkDirStep(workdirPath),
+					&containerfile.CommandRunStep{
+						Command: &command.DnfInstall{
+							Yes:      true,
+							Packages: []string{"golang"},
+						},
+					},
+					containerfile.CopyAllStep(),
+					&containerfile.RunStep{
+						Command: "make all",
+					},
+				},
+			},
+			{
+				Name:  "final",
+				Image: baseImage,
+				Steps: []containerfile.ContainerfileStep{
+					&containerfile.CopyStep{
+						From: "builder",
+						Src:  filepath.Join(workdirPath, "_output"),
+						Dest: "/usr/local/bin/",
+					},
+				},
+			},
+		},
 	}
-
-	defer os.RemoveAll(tempdir)
-
-	containerfilePath := filepath.Join(tempdir, "Containerfile")
-
-	if err := os.WriteFile(containerfilePath, []byte(steps.Containerfile()), 0o755); err != nil {
-		return err
-	}
-
-	build := &command.PodmanBuild{
-		Tag:  "localhost/something:latest",
-		File: containerfilePath,
-	}
-
-	cmd := build.Command().Cmd()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func main() {
-	cfile := generateContainerfile()
+	fmt.Println("Golang Containerfile:")
+	cfile := generateGolangBuildContainerfile()
+	fmt.Println(cfile.String())
 
-	fmt.Println("Containerfile:")
-	fmt.Println(cfile.Containerfile())
+	for _, cfile := range generateOtherContainerfiles() {
+		fmt.Println(cfile.String())
+	}
 }

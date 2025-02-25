@@ -2,6 +2,7 @@ package command
 
 import "fmt"
 
+// Represents a label given to podman or buildah build
 type Label struct {
 	Name  string
 	Value string
@@ -14,6 +15,7 @@ func (l *Label) flag() Flag {
 	}
 }
 
+// Represents a build arg passed to podman or buildah build
 type BuildArg struct {
 	Name  string
 	Value string
@@ -26,6 +28,7 @@ func (b *BuildArg) flag() Flag {
 	}
 }
 
+// Represents a volume passed to podman run
 type Volume struct {
 	HostPath      string
 	ContainerPath string
@@ -48,6 +51,7 @@ func (p *Volume) render() string {
 	return out
 }
 
+// Represents an env var passed into podman run
 type PodmanEnv struct {
 	Name  string
 	Value string
@@ -60,6 +64,7 @@ func (p *PodmanEnv) flag() Flag {
 	}
 }
 
+// Represents a podman tag command
 type PodmanTag struct {
 	Image      string
 	TargetName string
@@ -75,6 +80,7 @@ func (p *PodmanTag) Command() *Command {
 	})
 }
 
+// Represents a podman push command
 type PodmanPush struct {
 	Authfile  string
 	Format    string
@@ -101,6 +107,7 @@ func (p *PodmanPush) Command() *Command {
 	})
 }
 
+// Represents a podman build command
 type PodmanBuild struct {
 	BuildContext string
 	Tag          string
@@ -140,6 +147,7 @@ func (p *PodmanBuild) Command() *Command {
 	})
 }
 
+// Represents a podman run command.
 type PodmanRun struct {
 	Interactive     bool
 	Tty             bool
@@ -188,6 +196,7 @@ func (p *PodmanRun) Command() *Command {
 	}, p.ImageOpts...))
 }
 
+// Represents an unimplemented podman pull command
 type PodmanPull struct {
 	Image string
 }

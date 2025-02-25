@@ -1,5 +1,6 @@
 package command
 
+// Represents an rpm-ostree install command
 type RpmOstreeInstall struct {
 	Packages []string
 }

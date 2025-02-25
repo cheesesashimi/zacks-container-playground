@@ -1,5 +1,6 @@
 package command
 
+// Runs the p11kitextract command.
 type P11KitExtract struct {
 	Format    string
 	Filter    string
@@ -30,6 +31,7 @@ func (p *P11KitExtract) Command() *Command {
 	})
 }
 
+// Represents proxy configuration.
 type Proxy struct {
 	Http    string
 	Https   string
@@ -56,6 +58,7 @@ func (p *Proxy) flags() []Flag {
 	return flags
 }
 
+// Represents a buildah build command.
 type BuildahBuild struct {
 	Authfile      string
 	BuildArgs     []BuildArg
@@ -103,6 +106,7 @@ func (b *BuildahBuild) Command() *Command {
 	})
 }
 
+// Represents a buildah push command.
 type BuildahPush struct {
 	Authfile      string
 	CertDir       string

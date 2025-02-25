@@ -4,6 +4,7 @@ import (
 	"fmt"
 )
 
+// Represents an oc command. Note: This is not well fleshed-out.
 type OcCommand interface {
 	Command(string) *Command
 }

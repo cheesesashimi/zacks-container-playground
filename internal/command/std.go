@@ -2,6 +2,7 @@ package command
 
 import "fmt"
 
+// Represents an echo command.
 type Echo struct {
 	Content    string
 	Escape     bool
@@ -23,6 +24,7 @@ func (e *Echo) Command() *Command {
 	return NewCommand("echo", args)
 }
 
+// Represents the rm command.
 type Delete struct {
 	Path      string
 	Recursive bool
@@ -40,6 +42,7 @@ func (d *Delete) Command() *Command {
 	return NewCommand("rm", args)
 }
 
+// Represents the chmod command.
 type Chmod struct {
 	Path      string
 	Mode      string
@@ -59,6 +62,7 @@ func (c *Chmod) Command() *Command {
 	return NewCommand("chmod", args)
 }
 
+// Converts a map to double-flags.
 func mapToValFlags(valOpts map[string]string) []Flag {
 	out := []Flag{}
 
@@ -74,6 +78,7 @@ func mapToValFlags(valOpts map[string]string) []Flag {
 	return out
 }
 
+// Converts a bool map into double switch flags if the boolean value is true.
 func mapToSwitchFlags(switchOpts map[string]bool) []Flag {
 	out := []Flag{}
 
@@ -86,6 +91,7 @@ func mapToSwitchFlags(switchOpts map[string]bool) []Flag {
 	return out
 }
 
+// Converts a bool map into double switch flags only if the boolean pointer is not nil.
 func mapToOptSwitchFlags(optSwitchOpts map[string]*bool) []Flag {
 	out := []Flag{}
 
@@ -101,6 +107,7 @@ func mapToOptSwitchFlags(optSwitchOpts map[string]*bool) []Flag {
 	return out
 }
 
+// Converts a map to single switch flags.
 func mapToSingleSwitchFlag(switchOpts map[string]bool) []Flag {
 	out := []Flag{}
 
@@ -113,6 +120,7 @@ func mapToSingleSwitchFlag(switchOpts map[string]bool) []Flag {
 	return out
 }
 
+// Converts flags to arguments.
 func flagsToArgs(flags []Flag) []Arg {
 	args := []Arg{}
 
@@ -123,6 +131,7 @@ func flagsToArgs(flags []Flag) []Arg {
 	return args
 }
 
+// Converts a string slice into positional arguments.
 func itemsToPositionalArgs(items []string) []Arg {
 	args := []Arg{}
 

@@ -1,5 +1,6 @@
 package command
 
+// Constructs a command from a string slice.
 type CommandLiteral []string
 
 func (c CommandLiteral) Command() *Command {
@@ -12,6 +13,7 @@ func (c CommandLiteral) Command() *Command {
 	return NewCommand(c[0], args)
 }
 
+// Constructs a list of args from a string slice.
 type ArgLiterals []string
 
 func (a ArgLiterals) Arg() []Arg {
