@@ -1,0 +1,7 @@
+base_image: "registry.fedoraproject.org/fedora:latest"
+package_manager: "dnf"
+username: zack
+packages:
+  - nvim
+  - git
+  - golang

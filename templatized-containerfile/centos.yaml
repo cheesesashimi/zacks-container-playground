@@ -1,0 +1,7 @@
+base_image: "quay.io/centos/stream:9"
+package_manager: "yum"
+username: zack
+packages:
+  - nvim
+  - git
+  - golang

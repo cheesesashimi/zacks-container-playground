@@ -1,0 +1,7 @@
+base_image: "ubuntu:latest"
+package_manager: "apt-get"
+username: zack
+packages:
+  - nvim
+  - git
+  - golang

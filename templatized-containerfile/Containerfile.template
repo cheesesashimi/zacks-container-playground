@@ -1,0 +1,4 @@
+FROM {{ (datasource "input").base_image }}
+RUN {{ (datasource "input").package_manager }} install -y {{ range (datasource "input").packages -}}{{ . }} {{end}} && \
+    useradd {{ (datasource "input").username }}
+USER {{ (datasource "input").username }}
