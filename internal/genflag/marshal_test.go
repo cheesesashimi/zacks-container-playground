@@ -1,8 +1,8 @@
 package genflag
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,12 +13,109 @@ func TestMarshalFlags(t *testing.T) {
 		name          string
 		input         interface{}
 		expectedFlags []string
-		errExpected   bool
-		matchOrder    bool
+		// This field acts as a behavior comparison field. Much of the
+		// functionality of the MarshalFlags() function was inspired by how
+		// json.Marshal() works.
+		expectedJSON string
+		errExpected  bool
+		matchOrder   bool
 	}{
 		{
 			name: "Simple struct",
 			input: struct {
+				SingleOption         string `genflag:"single"`
+				DoubleOption         string `genflag:""`
+				Override             string `genflag:"overridden"`
+				ImplicitSwitch       bool   `genflag:""`
+				ExplicitSwitch       bool   `genflag:"explicit"`
+				FieldIgnored         bool
+				SingleQuoted         string `genflag:"quoted,single"`
+				MapIgnored           map[string]string
+				SliceIgnored         []string
+				CustomMarshalerMap   map[string]FlagMarshaller
+				CustomSlice          []FlagMarshaller
+				StringerSlice        []stringer          `genflag:""`
+				StringerMap          map[string]stringer `genflag:""`
+				IgnoredStringerSlice []stringer
+				IgnoredStringerMap   map[string]stringer
+			}{
+				SingleOption:   "singlevalue",
+				DoubleOption:   "doublevalue",
+				Override:       "overriddenvalue",
+				ImplicitSwitch: true,
+				ExplicitSwitch: false,
+				FieldIgnored:   false,
+				SingleQuoted:   "singlequotedvalue",
+				MapIgnored: map[string]string{
+					"i should": "be ignored",
+				},
+				SliceIgnored: []string{
+					"i should be ignored",
+				},
+				CustomMarshalerMap: map[string]FlagMarshaller{
+					"arg1": newCustomMarshaler("arg", "val"),
+					"arg2": newCustomMarshaler("anotherarg", "anotherval"),
+				},
+				CustomSlice: []FlagMarshaller{
+					newCustomMarshaler("customarg", "customval"),
+				},
+				StringerSlice: []stringer{
+					newSimpleStringer("stringer-1"),
+					newSimpleStringer("stringer-2"),
+				},
+				StringerMap: map[string]stringer{
+					"stringermap1": newSimpleStringer("stringer-1"),
+					"stringermap2": newSimpleStringer("stringer-2"),
+				},
+				IgnoredStringerSlice: []stringer{
+					newSimpleStringer("ignored-1"),
+					newSimpleStringer("ignored-2"),
+				},
+				IgnoredStringerMap: map[string]stringer{
+					"val1": newSimpleStringer("ignored-1"),
+					"val2": newSimpleStringer("ignored-2"),
+				},
+			},
+			expectedFlags: []string{
+				"-singleoption singlevalue",
+				"--doubleoption doublevalue",
+				"--overridden overriddenvalue",
+				"--implicitswitch",
+				"--explicitswitch false",
+				`-singlequoted "singlequotedvalue"`,
+				"--arg val",
+				"--anotherarg anotherval",
+				"--customarg customval",
+				"--stringermap1 stringer-1",
+				"--stringermap2 stringer-2",
+				"--stringerslice stringer-1",
+				"--stringerslice stringer-2",
+			},
+		},
+		{
+			name: "Struct with flag slice",
+			input: struct {
+				Args []string `genflag:"arg"`
+			}{
+				Args: []string{
+					"arg1",
+					"arg2",
+					"arg3",
+					"arg4",
+					"arg5",
+				},
+			},
+			expectedFlags: []string{
+				"--arg arg1",
+				"--arg arg2",
+				"--arg arg3",
+				"--arg arg4",
+				"--arg arg5",
+			},
+		},
+		{
+			name: "Simple struct pointer",
+			input: &struct {
 				SingleOption   string `genflag:"single"`
 				DoubleOption   string `genflag:""`
 				Override       string `genflag:"overridden"`
@@ -42,6 +139,65 @@ func TestMarshalFlags(t *testing.T) {
 				"--implicitswitch",
 				"--explicitswitch false",
 				`-singlequoted "singlequotedvalue"`,
+			},
+		},
+		{
+			name: "Struct with stringers",
+			input: struct {
+				Args    []stringer          `genflag:""`
+				MapArgs map[string]stringer `genflag:""`
+			}{
+				Args: []stringer{
+					newSimpleStringer("arg1"),
+					newSimpleStringer("arg2"),
+					newSimpleStringer("arg3"),
+				},
+				MapArgs: map[string]stringer{
+					"arg1": newSimpleStringer("val1"),
+					"arg2": newSimpleStringer("val2"),
+				},
+			},
+			expectedFlags: []string{
+				"--args arg1",
+				"--args arg2",
+				"--args arg3",
+				"--arg1 val1",
+				"--arg2 val2",
+			},
+		},
+		{
+			name: "Top level stringer map",
+			input: map[string]stringer{
+				"arg1": newSimpleStringer("val1"),
+				"arg2": newSimpleStringer("val2"),
+			},
+			expectedFlags: []string{
+				"--arg1 val1",
+				"--arg2 val2",
+			},
+		},
+		{
+			name: "Top level FlagMarshaller map",
+			input: map[string]FlagMarshaller{
+				// If one is providing the custom marshaler, one should
+				// also provide the name.
+				"mapval1": newCustomMarshaler("arg1", "value1"),
+				"mapval2": newCustomMarshaler("arg2", "value2"),
+			},
+			expectedFlags: []string{
+				"--arg1 value1",
+				"--arg2 value2",
+			},
+		},
+		{
+			name: "Top level FlagMarshaller slice",
+			input: []FlagMarshaller{
+				newCustomMarshaler("arg1", "value1"),
+				newCustomMarshaler("arg2", "value2"),
+			},
+			expectedFlags: []string{
+				"--arg1 value1",
+				"--arg2 value2",
 			},
 		},
 		{
@@ -135,6 +291,7 @@ func TestMarshalFlags(t *testing.T) {
 				"--toplevel toplevelopt",
 				"--taggedfield value",
 			},
+			expectedJSON: `{"TopLevel":"toplevelopt","NestedStruct":{"TaggedField":"value"}}`,
 		},
 		{
 			name: "Struct with tagged nested struct with field tag",
@@ -169,6 +326,7 @@ func TestMarshalFlags(t *testing.T) {
 				"--toplevel toplevelopt",
 				"--taggedfield value",
 			},
+			expectedJSON: `{"TopLevel":"toplevelopt","TaggedField":"value"}`,
 		},
 		{
 			name: "Struct with embedded nested struct with field tag",
@@ -282,13 +440,24 @@ func TestMarshalFlags(t *testing.T) {
 			},
 		},
 		{
-			name: "Nil pointer on field",
+			name: "Nil untagged pointer on field",
 			input: struct {
 				Hello *string
 			}{
 				Hello: nil,
 			},
 			expectedFlags: []string{},
+			expectedJSON:  `{"Hello":null}`,
+		},
+		{
+			name: "Nil tagged pointer on field",
+			input: struct {
+				Hello *string `genflag:""`
+			}{
+				Hello: nil,
+			},
+			expectedFlags: []string{},
+			expectedJSON:  `{"Hello":null}`,
 		},
 		{
 			name: "Coexists with other struct tags",
@@ -328,6 +497,8 @@ func TestMarshalFlags(t *testing.T) {
 				OptList: []*string{
 					stringToPtr("opt1"),
 					stringToPtr("opt2"),
+					// TODO: Determine how we should handle a pointer value being nil.
+					nil,
 				},
 			},
 			expectedFlags: []string{
@@ -336,6 +507,7 @@ func TestMarshalFlags(t *testing.T) {
 				"--optlist opt1",
 				"--optlist opt2",
 			},
+			expectedJSON: `{"Switch":true,"Opt":"arg","NilSwitch":null,"NilOpt":null,"OptList":["opt1","opt2",null]}`,
 		},
 		{
 			name: "Handles empty interfaces",
@@ -349,15 +521,16 @@ func TestMarshalFlags(t *testing.T) {
 				BoolPtrMap           map[string]interface{} `genflag:""`
 				CombinedMap          map[string]interface{} `genflag:""`
 				EmptyWithMap         interface{}            `genflag:""`
-				Ignored              string
-				UntaggedNestedStruct interface{} `genflag:""`
-				TaggedNestedStruct   interface{} `genflag:""`
+				Ignored              string                 `json:"-"`
+				UntaggedNestedStruct interface{}            `genflag:""`
+				TaggedNestedStruct   interface{}            `genflag:""`
 			}{
 				SwitchPtr: boolToPtr(true),
 				Switch:    true,
 				StringList: []interface{}{
 					"opt1",
 					"opt2",
+					newSimpleStringer("simplestringer"),
 				},
 				StringMap: map[string]interface{}{
 					"opt1": "opt2",
@@ -373,8 +546,9 @@ func TestMarshalFlags(t *testing.T) {
 					"opt7": boolToPtr(true),
 				},
 				CombinedMap: map[string]interface{}{
-					"opt8":  stringToPtr("opt9"),
-					"opt10": boolToPtr(true),
+					"opt8":       stringToPtr("opt9"),
+					"opt10":      boolToPtr(true),
+					"anotheropt": newSimpleStringer("simplestringer"),
 				},
 				EmptyWithMap: map[string]interface{}{
 					"opt11": "opt12",
@@ -395,6 +569,7 @@ func TestMarshalFlags(t *testing.T) {
 				"--switch",
 				"--stringlist opt1",
 				"--stringlist opt2",
+				"--stringlist simplestringer",
 				"--opt1 opt2",
 				"--opt3 true",
 				"--opt4 false",
@@ -407,17 +582,110 @@ func TestMarshalFlags(t *testing.T) {
 				"--opt15",
 				"--opt16",
 				"--taggedfield taggedvalue",
+				"--anotheropt simplestringer",
+			},
+			expectedJSON: `{"SwitchPtr":true,"Switch":true,"StringList":["opt1","opt2",{}],"StringMap":{"opt1":"opt2"},"BoolMap":{"opt3":true,"opt4":false},"StringPtrMap":{"opt5":"opt6"},"BoolPtrMap":{"opt7":true},"CombinedMap":{"anotheropt":{},"opt10":true,"opt8":"opt9"},"EmptyWithMap":{"opt11":"opt12","opt13":"opt14","opt15":true,"opt16":true},"UntaggedNestedStruct":{},"TaggedNestedStruct":{"TaggedField":"taggedvalue"}}`,
+		},
+		{
+			name: "Handles top level map string interface",
+			input: map[string]interface{}{
+				"opt":  "arg",
+				"args": []string{"arg1", "arg2", "arg3"},
+				"kv": map[string]string{
+					"opt1": "arg1",
+					"opt2": "arg2",
+					"opt3": "arg3",
+				},
+				"switches": map[string]bool{
+					"switch1": true,
+					"switch2": true,
+				},
+				"mixed": map[string]interface{}{
+					"mixed1": "mixed2",
+					"mixed3": true,
+					"mixed4": stringToPtr("mixed5"),
+					"mixed6": boolToPtr(true),
+				},
+				"struct": struct {
+					StructArg string `genflag:""`
+				}{
+					StructArg: "structargval",
+				},
+				"level1": map[string]interface{}{
+					"level2-arg1": "val1",
+					"level2-arg2": "val2",
+					"level2-arg3": "val3",
+					"level2": map[string]interface{}{
+						"level3-arg1": "val1",
+						"level3-arg2": "val2",
+						"level3-arg3": "val3",
+						"level3": map[string]interface{}{
+							"level4-arg1": "val1",
+							"level4-arg2": "val2",
+							"level4-arg3": "val3",
+							"level4": map[string]interface{}{
+								"level5-arg1": "val1",
+								"level5-arg2": "val2",
+								"level5-arg3": "val3",
+								"level5-arg4": []string{"opt1", "opt2", "opt3"},
+							},
+						},
+					},
+				},
+			},
+			expectedFlags: []string{
+				"--opt arg",
+				"--args arg1",
+				"--args arg2",
+				"--args arg3",
+				"--opt1 arg1",
+				"--opt2 arg2",
+				"--opt3 arg3",
+				"--switch1",
+				"--switch2",
+				"--mixed1 mixed2",
+				"--mixed3",
+				"--mixed4 mixed5",
+				"--mixed6",
+				"--level2-arg1 val1",
+				"--level2-arg2 val2",
+				"--level2-arg3 val3",
+				"--level3-arg1 val1",
+				"--level3-arg2 val2",
+				"--level3-arg3 val3",
+				"--level4-arg1 val1",
+				"--level4-arg2 val2",
+				"--level4-arg3 val3",
+				"--level5-arg1 val1",
+				"--level5-arg2 val2",
+				"--level5-arg3 val3",
+				"--level5-arg4 opt1",
+				"--level5-arg4 opt2",
+				"--level5-arg4 opt3",
+				"--structarg structargval",
 			},
 		},
 		{
-			name:        "Errors on listed structs",
-			input:       newListStruct(5, "opt"),
-			errExpected: true,
+			name:  "List of structs with tags and unique values",
+			input: newListStruct(5, "opt"),
+			expectedFlags: []string{
+				"--field opt-1",
+				"--field opt-2",
+				"--field opt-3",
+				"--field opt-4",
+				"--field opt-5",
+			},
 		},
 		{
-			name:        "Errors on listed struct pointers",
-			input:       newListStructPtr(5, "opt"),
-			errExpected: true,
+			name:  "Errors on listed struct pointers",
+			input: newListStructPtr(5, "opt"),
+			expectedFlags: []string{
+				"--field opt-1",
+				"--field opt-2",
+				"--field opt-3",
+				"--field opt-4",
+				"--field opt-5",
+			},
 		},
 		{
 			name: "Key value map",
@@ -457,7 +725,7 @@ func TestMarshalFlags(t *testing.T) {
 			expectedFlags: []string{},
 		},
 		{
-			name: "Errors on tagged list of structs within struct",
+			name: "Tagged list of structs within struct",
 			input: struct {
 				Nested  []listStruct `genflag:""`
 				Another string       `genflag:""`
@@ -465,10 +733,15 @@ func TestMarshalFlags(t *testing.T) {
 				Nested:  newListStruct(3, "opt"),
 				Another: "value",
 			},
-			errExpected: true,
+			expectedFlags: []string{
+				"--another value",
+				"--field opt-1",
+				"--field opt-2",
+				"--field opt-3",
+			},
 		},
 		{
-			name: "Errors on tagged list of struct pointers within struct",
+			name: "Tagged list of struct pointers within struct",
 			input: struct {
 				Nested  []*listStruct `genflag:""`
 				Another string        `genflag:""`
@@ -476,15 +749,25 @@ func TestMarshalFlags(t *testing.T) {
 				Nested:  newListStructPtr(3, "opt"),
 				Another: "value",
 			},
-			errExpected: true,
+			expectedFlags: []string{
+				"--another value",
+				"--field opt-1",
+				"--field opt-2",
+				"--field opt-3",
+			},
 		},
 		{
 			name: "List of structs without tag are ignored",
 			input: struct {
-				Nested  []listStruct
+				Nested  []NestedStructWithoutTaggedField
 				Another string `genflag:""`
 			}{
-				Nested:  newListStruct(3, "opt"),
+				Nested: []NestedStructWithoutTaggedField{
+					{
+						UntaggedField: "should be ignored",
+					},
+				},
+				// Nested:  newListStruct(3, "opt"),
 				Another: "value",
 			},
 			expectedFlags: []string{
@@ -494,10 +777,14 @@ func TestMarshalFlags(t *testing.T) {
 		{
 			name: "List of struct pointers without tag are ignored",
 			input: struct {
-				Nested  []*listStruct
+				Nested  []*NestedStructWithoutTaggedField
 				Another string `genflag:""`
 			}{
-				Nested:  newListStructPtr(3, "opt"),
+				Nested: []*NestedStructWithoutTaggedField{
+					{
+						UntaggedField: "should be ignored",
+					},
+				},
 				Another: "value",
 			},
 			expectedFlags: []string{
@@ -519,10 +806,8 @@ func TestMarshalFlags(t *testing.T) {
 			errExpected: true,
 		},
 		{
-			name: "Errors on string list",
-			input: []string{
-				"opt1",
-			},
+			name:        "Errors on string list",
+			input:       []string{"opt1"},
 			errExpected: true,
 		},
 		{
@@ -560,6 +845,16 @@ func TestMarshalFlags(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
+		if testCase.expectedJSON != "" {
+			// Only execute this subtest whenever the field is populated. This is
+			// because not every test needs to marshal the test input into JSON.
+			t.Run(testCase.name+" JSON", func(t *testing.T) {
+				out, err := json.Marshal(testCase.input)
+				assert.NoError(t, err)
+				assert.Equal(t, testCase.expectedJSON, string(out))
+			})
+		}
+
 		t.Run(testCase.name, func(t *testing.T) {
 			results, err := MarshalFlags(testCase.input)
 
@@ -567,6 +862,10 @@ func TestMarshalFlags(t *testing.T) {
 				assert.Error(t, err)
 				t.Log(err)
 				return
+			}
+
+			if err != nil {
+				t.Log(err)
 			}
 
 			assert.NoError(t, err)
@@ -587,6 +886,8 @@ func TestMarshalFlags(t *testing.T) {
 	}
 }
 
+// Tests the validateFlagList method on the marshaler struct in isolation from
+// all other code.
 func TestValidateFlagList(t *testing.T) {
 	testCases := []struct {
 		name        string
@@ -804,7 +1105,7 @@ type NestedStructWithTaggedField struct {
 }
 
 type NestedStructWithoutTaggedField struct {
-	UntaggedField string
+	UntaggedField string `json:"-"`
 }
 
 type listStruct struct {
@@ -835,16 +1136,31 @@ func newListStruct(n int, val string) []listStruct {
 	return out
 }
 
+type simpleStringer struct {
+	value string
+}
+
+func newSimpleStringer(v string) simpleStringer {
+	return simpleStringer{value: v}
+}
+
+func (s simpleStringer) String() string {
+	return s.value
+}
+
 type customMarshaler struct {
+	Flag
 	name  string
 	value string
 }
 
 func newCustomMarshaler(name, value string) customMarshaler {
-	return customMarshaler{
-		name:  name,
-		value: value,
+	f, err := NewStringFlag(name, value)
+	if err != nil {
+		panic(err)
 	}
+
+	return customMarshaler{Flag: f, name: name, value: value}
 }
 
 func newCustomMarshalerPtr(name, value string) *customMarshaler {
@@ -852,35 +1168,6 @@ func newCustomMarshalerPtr(name, value string) *customMarshaler {
 	return &cm
 }
 
-func (c customMarshaler) Name() string {
-	return c.name
-}
-
-func (c customMarshaler) Value() string {
-	return c.value
-}
-
-func (c customMarshaler) String() (string, error) {
-	val, err := c.Segmented()
-	return strings.Join(val, " "), err
-}
-
-func (c customMarshaler) Segmented() ([]string, error) {
-	return []string{c.getDashedName(), c.value}, nil
-}
-
-func (c customMarshaler) getDashedName() string {
-	return fmt.Sprintf("--%s", c.name)
-}
-
 func (c customMarshaler) MarshalFlags() ([]Flag, error) {
-	return []Flag{c}, nil
-}
-
-func boolToPtr(val bool) *bool {
-	return &val
-}
-
-func stringToPtr(s string) *string {
-	return &s
+	return []Flag{c.Flag}, nil
 }

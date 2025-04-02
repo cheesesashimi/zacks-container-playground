@@ -2,6 +2,16 @@ package genflag
 
 import "fmt"
 
+type listFlagContainer struct {
+	name        string
+	values      []string
+	optionFuncs []optionFunc
+}
+
+func (l listFlagContainer) Flags() ([]Flag, error) {
+	return NewListFlags(l.name, l.values, l.optionFuncs...)
+}
+
 // A listflag is just a type alias for string flags. The difference is that the
 // factory which produces these assumes the same name for the flag, but
 // provides different values. This is useful for CLI options which expect many

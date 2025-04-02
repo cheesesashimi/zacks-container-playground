@@ -167,7 +167,7 @@ func TestGenFlagOpts(t *testing.T) {
 				testCase.expected.name = "oldname"
 			}
 
-			cfo, err := newGenFlagOpts(fieldName, testCase.tagInput)
+			gfo, err := newGenFlagOpts(fieldName, testCase.tagInput)
 			if testCase.errExpected {
 				assert.Error(t, err)
 				t.Log(err)
@@ -175,7 +175,58 @@ func TestGenFlagOpts(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			assert.Equal(t, testCase.expected, *cfo)
+			assert.Equal(t, testCase.expected, *gfo)
 		})
 	}
+}
+
+func TestGenFlagOptsBoolean(t *testing.T) {
+	t.Run("Implicit true", func(t *testing.T) {
+		gfo, err := newGenFlagOpts("switch", "")
+		assert.NoError(t, err)
+
+		f, err := gfo.newBoolFlagWithName(true)
+		assert.NoError(t, err)
+		assert.Len(t, f, 1)
+
+		content, err := f[0].String()
+		assert.NoError(t, err)
+
+		assert.Equal(t, "--switch", content)
+	})
+
+	t.Run("Implicit false", func(t *testing.T) {
+		gfo, err := newGenFlagOpts("switch", "")
+		assert.NoError(t, err)
+
+		f, err := gfo.newBoolFlagWithName(false)
+		assert.NoError(t, err)
+		assert.Len(t, f, 0)
+	})
+
+	t.Run("Explicit true", func(t *testing.T) {
+		gfo, err := newGenFlagOpts("switch", "explicit")
+
+		f, err := gfo.newBoolFlagWithName(true)
+		assert.NoError(t, err)
+		assert.Len(t, f, 1)
+
+		content, err := f[0].String()
+		assert.NoError(t, err)
+
+		assert.Equal(t, "--switch true", content)
+	})
+
+	t.Run("Explicit false", func(t *testing.T) {
+		gfo, err := newGenFlagOpts("switch", "explicit")
+
+		f, err := gfo.newBoolFlagWithName(false)
+		assert.NoError(t, err)
+		assert.Len(t, f, 1)
+
+		content, err := f[0].String()
+		assert.NoError(t, err)
+
+		assert.Equal(t, "--switch false", content)
+	})
 }

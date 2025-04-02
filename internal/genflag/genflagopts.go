@@ -98,14 +98,34 @@ func (g *genFlagOpts) getOptionFuncs() []optionFunc {
 
 // Constructs a new string flag with the given value, optionfuncs, and either
 // the field name or the overridden name.
-func (g *genFlagOpts) newStringFlagWithName(val string) (Flag, error) {
-	return NewStringFlag(g.name, val, g.getOptionFuncs()...)
+func (g *genFlagOpts) newStringFlagWithName(val string) ([]Flag, error) {
+	return g.newStringFlag(g.name, val)
+}
+
+func (g *genFlagOpts) newStringFlag(name, val string) ([]Flag, error) {
+	return g.toPlural(NewStringFlag(name, val, g.getOptionFuncs()...))
 }
 
 // Constructs a new boolean flag with the given value, optionfuncs, and either
 // the field name or the overridden name.
-func (g *genFlagOpts) newBoolFlagWithName(val bool) (Flag, error) {
-	return NewBoolFlag(g.name, val, g.getOptionFuncs()...)
+func (g *genFlagOpts) newBoolFlagWithName(val bool) ([]Flag, error) {
+	// If the explciit option is enabled, return the boolflag regardless of its
+	// value.
+	if g.setOpts[genFlagExplicitOpt] {
+		return g.toPlural(NewBoolFlag(g.name, val, g.getOptionFuncs()...))
+	}
+
+	if val {
+		// If the explciit option is not enabled, only return the boolflag when it
+		// is true.
+		return g.toPlural(NewBoolFlag(g.name, val, g.getOptionFuncs()...))
+	}
+
+	return nil, nil
+}
+
+func (g *genFlagOpts) toPlural(f Flag, err error) ([]Flag, error) {
+	return []Flag{f}, err
 }
 
 // Constructs list flags with the given values, optionfuncs, and either the

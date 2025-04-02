@@ -93,8 +93,12 @@ func (m marshaler) validateFlagList(flags []Flag) error {
 	return nil
 }
 
-// Dereferences any pointer values that were given.
-func (m marshaler) handlePointers(in interface{}) (reflect.Type, reflect.Value) {
+// Begins the main marshaling process.
+func (m marshaler) marshal(in interface{}) ([]Flag, error) {
+	if in == nil {
+		return nil, fmt.Errorf("cannot marshal flags from nil value")
+	}
+
 	val := reflect.ValueOf(in)
 	typ := reflect.TypeOf(in)
 
@@ -103,19 +107,10 @@ func (m marshaler) handlePointers(in interface{}) (reflect.Type, reflect.Value) 
 		typ = typ.Elem()
 	}
 
-	return typ, val
-}
-
-// Begins the main marshaling process.
-func (m marshaler) marshal(in interface{}) ([]Flag, error) {
-	if in == nil {
-		return nil, fmt.Errorf("cannot marshal flags from nil value")
-	}
-
-	typ, val := m.handlePointers(in)
-
-	if m.isMarshalFlags(typ) {
-		return m.runMarshalFlags(typ, val)
+	// If our input implements the FlagMarshaller interface, call it and return
+	// the results.
+	if m.isFlagMarshaller(typ) {
+		return m.runFlagMarshaller(typ, val)
 	}
 
 	kind := typ.Kind()
@@ -125,15 +120,16 @@ func (m marshaler) marshal(in interface{}) ([]Flag, error) {
 		return m.marshalStructFields(typ, val)
 	}
 
-	// If we have a top-level slice or array, return an error since
-	// there is nothing we can do with it.
+	// If we have a top-level slice or array, return an error since there is
+	// nothing we can do with it. Any slices or arrays must be contained within a
+	// struct field.
 	if kind == reflect.Slice || kind == reflect.Array {
-		return nil, fmt.Errorf("top-level slices / arrays not supported")
+		return m.marshalTopLevelSlice(val)
 	}
 
 	// If we have a map, convert it into keyValueFlags.
 	if kind == reflect.Map {
-		return m.getFlagMap(nil, val)
+		return m.marshalMap(nil, val)
 	}
 
 	return nil, fmt.Errorf("unknown kind %q", kind)
@@ -145,7 +141,7 @@ func (m marshaler) marshalStructFields(typ reflect.Type, val reflect.Value) ([]F
 	cliflags := []Flag{}
 
 	for i := 0; i < val.NumField(); i++ {
-		f, err := m.parseField(typ.Field(i), val.Field(i))
+		f, err := m.marshalStructField(typ.Field(i), val.Field(i))
 		if err != nil {
 			return nil, fmt.Errorf("cannot parse struct field %q: %w", typ.Field(i).Name, err)
 		}
@@ -156,17 +152,46 @@ func (m marshaler) marshalStructFields(typ reflect.Type, val reflect.Value) ([]F
 	return cliflags, nil
 }
 
-// Determines if a given type implements the FlagMarshaler interface.
-func (m marshaler) isMarshalFlags(typ reflect.Type) bool {
-	interfaceType := reflect.TypeOf((*FlagMarshaler)(nil)).Elem()
+// Determines if a given type implements the FlagMarshaller interface.
+func (m marshaler) isFlagMarshaller(typ reflect.Type) bool {
+	interfaceType := reflect.TypeOf((*FlagMarshaller)(nil)).Elem()
 	return typ.Implements(interfaceType)
 }
 
-// Calls the FlagMarshaler interface on a given type, if it
+type stringer interface {
+	String() string
+}
+
+func (m marshaler) isStringer(typ reflect.Type) bool {
+	interfaceType := reflect.TypeOf((*stringer)(nil)).Elem()
+	return typ.Implements(interfaceType)
+}
+
+func (m marshaler) runStringer(typ reflect.Type, val reflect.Value) (string, error) {
+	if !m.isStringer(typ) {
+		return "", fmt.Errorf("does not implement stringer")
+	}
+
+	methodValue := val.MethodByName("String")
+
+	results := methodValue.Call(nil)
+
+	if len(results) != 1 {
+		return "", fmt.Errorf("expected 1 result, got %d", len(results))
+	}
+
+	if result, sliceOK := results[0].Interface().(string); sliceOK {
+		return result, nil
+	}
+
+	return "", fmt.Errorf("a problem occured while calling String()")
+}
+
+// Calls the FlagMarshaller interface on a given type, if it
 // implements it.
-func (m marshaler) runMarshalFlags(typ reflect.Type, val reflect.Value) ([]Flag, error) {
-	if !m.isMarshalFlags(typ) {
-		return nil, fmt.Errorf("does not implement FlagMarshaler")
+func (m marshaler) runFlagMarshaller(typ reflect.Type, val reflect.Value) ([]Flag, error) {
+	if !m.isFlagMarshaller(typ) {
+		return nil, fmt.Errorf("does not implement FlagMarshaller")
 	}
 
 	methodValue := val.MethodByName("MarshalFlags")
@@ -193,60 +218,69 @@ func (m marshaler) runMarshalFlags(typ reflect.Type, val reflect.Value) ([]Flag,
 	return nil, fmt.Errorf("expected a slice of Flags, got: %q", results[1].Interface())
 }
 
-func (m marshaler) isStructTagged(typ reflect.Type, val reflect.Value) bool {
-	// Dereference any pointers.
-	if val.Kind() == reflect.Ptr {
-		if val.IsNil() {
-			// If the pointer is nil, there is nothing to do.
-			return false
-		}
-	}
-
-	for i := 0; i < val.NumField(); i++ {
-		field := typ.Field(i)
-		_, ok := field.Tag.Lookup(genFlagKeyName)
-		if ok {
-			return true
-		}
-	}
-
-	return false
-}
-
 // Parses the field of a given struct.
-func (m marshaler) parseField(field reflect.StructField, val reflect.Value) ([]Flag, error) {
-	// Dereference any pointers.
-	if val.Kind() == reflect.Ptr {
-		if val.IsNil() {
-			// If the pointer is nil, there is nothing to do.
-			return nil, nil
-		}
-
-		val = val.Elem()
+func (m marshaler) marshalStructField(field reflect.StructField, val reflect.Value) ([]Flag, error) {
+	if m.isNilPointer(val) {
+		return nil, nil
 	}
 
-	// If the field's concrete tyoe implements FlagMarshaler, call
-	// it directly and return the results.
-	if m.isMarshalFlags(val.Type()) {
-		return m.runMarshalFlags(val.Type(), val)
-	}
+	val = m.getValue(val)
 
 	kind := val.Kind()
 
-	// If we found a struct, recursively handle it regardless of
-	// whether the field is tagged or not.
-	// TODO: Determine if this is the desired behavior or not.
+	_, ok := field.Tag.Lookup(genFlagKeyName)
+	if !ok {
+		return m.marshalUntaggedStructField(field, val, kind)
+	}
+
+	return m.marshalTaggedStructField(field, val, kind)
+}
+
+// Handles untagged struct fields as well as discovering whether a given struct
+// implements FlagMarshaller.
+func (m marshaler) marshalUntaggedStructField(field reflect.StructField, val reflect.Value, kind reflect.Kind) ([]Flag, error) {
+	// If the field's concrete tyoe implements FlagMarshaller, call
+	// it directly and return the results.
+	if m.isFlagMarshaller(val.Type()) {
+		return m.runFlagMarshaller(val.Type(), val)
+		// return m.marshal(val.Interface())
+	}
+
+	// If we found a struct, recursively handle it regardless of whether it has a
+	// field tag or not. This allows us to examine nested structs which may or
+	// may not have field tags.
 	if kind == reflect.Struct {
 		return m.marshal(val.Interface())
 	}
 
+	if (kind == reflect.Slice || kind == reflect.Array || kind == reflect.Map) && m.isFlagMarshaller(val.Type().Elem()) {
+		return m.marshal(val.Interface())
+	}
+
+	return nil, nil
+}
+
+func (m marshaler) getFlagsFromFlagMarshallerSlice(val reflect.Value) ([]Flag, error) {
+	flags := []Flag{}
+	err := m.traverseSlice(val, func(v reflect.Value) error {
+		f, err := m.marshal(v.Interface())
+		if err != nil {
+			return err
+		}
+
+		flags = append(flags, f...)
+
+		return nil
+	})
+
+	return flags, err
+}
+
+// Handles the tagged struct fields.
+func (m marshaler) marshalTaggedStructField(field reflect.StructField, val reflect.Value, kind reflect.Kind) ([]Flag, error) {
 	tagContents, ok := field.Tag.Lookup(genFlagKeyName)
 	if !ok {
 		return nil, nil
-	}
-
-	if !field.IsExported() {
-		return nil, fmt.Errorf("cannot reflect from unexported field")
 	}
 
 	gfo, err := newGenFlagOpts(field.Name, tagContents)
@@ -254,39 +288,155 @@ func (m marshaler) parseField(field reflect.StructField, val reflect.Value) ([]F
 		return nil, err
 	}
 
-	// If we found a struct, recursively handle it.
-	// if kind == reflect.Struct {
-	// 	return m.marshal(val.Interface())
-	// }
+	if !field.IsExported() {
+		return nil, fmt.Errorf("cannot reflect from unexported field")
+	}
+
+	if m.isStringer(val.Type()) {
+		r, err := m.runStringer(val.Type(), val)
+		if err != nil {
+			return nil, err
+		}
+
+		return gfo.newStringFlagWithName(r)
+	}
+
+	if kind == reflect.Struct {
+		return m.marshal(val.Interface())
+	}
 
 	if kind == reflect.String && val.String() != "" {
-		return toPlural(gfo.newStringFlagWithName(val.String()))
+		return gfo.newStringFlagWithName(val.String())
 	}
 
 	if kind == reflect.Bool {
-		return toPlural(gfo.newBoolFlagWithName(val.Bool()))
+		return gfo.newBoolFlagWithName(val.Bool())
 	}
 
 	if kind == reflect.Map {
-		return m.getFlagMap(gfo, val)
+
+		return m.marshalMap(gfo, val)
 	}
 
 	if kind == reflect.Array || kind == reflect.Slice {
-		if reflect.TypeOf(val.Interface()).Elem().Kind() == reflect.Struct {
-			return nil, fmt.Errorf("listed nested structs not supported")
-		}
-		return m.getFlagSlice(gfo, val)
+		return m.marshalSlice(gfo, "", val)
 	}
 
 	if kind == reflect.Interface {
-		return m.parseField(field, reflect.ValueOf(val.Interface()))
+		return m.marshal(val.Interface())
 	}
 
 	return nil, nil
 }
 
-// Traverses a slice or array and calls the given function on each value found within.
-func (m marshaler) traverseSliceOrArray(val reflect.Value, f func(reflect.Value) error) error {
+// Retrieves the string slice values from a given struct field.
+func (m marshaler) fetchStringSliceValues(val reflect.Value) ([]string, error) {
+	items := []string{}
+
+	for i := 0; i < val.Len(); i++ {
+		sliceVal := val.Index(i)
+		if m.isNilPointer(sliceVal) {
+			continue
+		}
+
+		sliceVal = m.getValue(sliceVal)
+
+		kind := sliceVal.Kind()
+
+		if kind != reflect.String {
+			return nil, fmt.Errorf("unsupported slice kind %s", kind)
+		}
+
+		items = append(items, sliceVal.String())
+	}
+
+	return items, nil
+}
+
+func (m marshaler) newStringFlag(gfo *genFlagOpts, name, value string) ([]Flag, error) {
+	if gfo == nil && name == "" {
+		return nil, fmt.Errorf("when genFlagOpts is not passed, a name is required")
+	}
+
+	if gfo != nil {
+		if name == "" {
+			return gfo.newStringFlagWithName(value)
+		}
+
+		return gfo.newStringFlag(name, value)
+	}
+
+	f, err := NewStringFlag(name, value)
+	return []Flag{f}, err
+}
+
+// Fetches the string slice values from a given struct field and passes them
+// into the listflag constructor either by passing them through genFlagOpts to
+// get the field name and optionFuncs or by calling the constructor directly.
+func (m marshaler) newListFlag(gfo *genFlagOpts, name string, items []string) ([]Flag, error) {
+	if gfo != nil {
+		return gfo.newListFlag(items)
+	}
+
+	if gfo == nil && name == "" {
+		return nil, fmt.Errorf("when genFlagOpts is not passed, a name is required")
+	}
+
+	return NewListFlags(name, items)
+}
+
+// Passes the provided string map into the NewKeyValueFlags constructor either
+// by passing them through genFlagOpts to get the field name and optionFuncs or
+// by calling the constructor directly.
+func (m marshaler) newKeyValueFlag(gfo *genFlagOpts, vals map[string]string) ([]Flag, error) {
+	if gfo != nil {
+		return gfo.newKeyValueFlag(vals)
+	}
+
+	return NewKeyValueFlags(vals)
+}
+
+// Passes the provided string map into the NewSwitchFlag constructor either by
+// passing them through genFlagOpts to get the field name and optionFuncs or by
+// calling the constructor directly.
+func (m marshaler) newSwitchFlag(gfo *genFlagOpts, vals map[string]bool) ([]Flag, error) {
+	if gfo != nil {
+		return gfo.newSwitchFlag(vals)
+	}
+
+	return NewSwitchFlags(vals)
+}
+
+func (m marshaler) marshalTopLevelSlice(val reflect.Value) ([]Flag, error) {
+	elemType := val.Type().Elem()
+	elemKind := elemType.Kind()
+
+	kinds := map[reflect.Kind]struct{}{
+		reflect.Struct:    struct{}{},
+		reflect.Interface: struct{}{},
+		reflect.Pointer:   struct{}{},
+	}
+
+	if _, ok := kinds[elemKind]; !ok {
+		return nil, fmt.Errorf("slices of %s not supported at top-level", elemKind)
+	}
+
+	flags := []Flag{}
+
+	for i := 0; i < val.Len(); i++ {
+		sliceVal := m.getValue(val.Index(i))
+		f, err := m.marshal(sliceVal.Interface())
+		if err != nil {
+			return nil, err
+		}
+
+		flags = append(flags, f...)
+	}
+
+	return flags, nil
+}
+
+func (m marshaler) traverseSlice(val reflect.Value, f func(reflect.Value) error) error {
 	for i := 0; i < val.Len(); i++ {
 		if err := f(val.Index(i)); err != nil {
 			return err
@@ -296,41 +446,71 @@ func (m marshaler) traverseSliceOrArray(val reflect.Value, f func(reflect.Value)
 	return nil
 }
 
-func (m marshaler) getFlagSlice(gfo *genFlagOpts, val reflect.Value) ([]Flag, error) {
-	items := []string{}
-
+// Converts a slice into flags.
+func (m marshaler) marshalSlice(gfo *genFlagOpts, name string, val reflect.Value) ([]Flag, error) {
 	flags := []Flag{}
 
-	err := m.traverseSliceOrArray(val, func(sliceVal reflect.Value) error {
-		kind := sliceVal.Kind()
+	items := []string{}
 
-		if kind == reflect.Pointer {
-			sliceVal = sliceVal.Elem()
+	err := m.traverseSlice(val, func(v reflect.Value) error {
+		if m.isNilPointer(v) {
+			return nil
 		}
 
-		if kind == reflect.Struct {
-			return fmt.Errorf("list of structs not supported")
+		if m.isStringer(v.Type()) {
+			r, err := m.runStringer(v.Type(), v)
+			if err != nil {
+				return err
+			}
+
+			items = append(items, r)
+			return nil
 		}
 
-		s, b, err := m.getMapOrSliceElement(sliceVal)
-		if err != nil {
-			return err
+		v = m.getValue(v)
+		kind := v.Kind()
+
+		if kind == reflect.Struct || kind == reflect.Interface {
+			if m.isStringer(v.Type()) {
+				r, err := m.runStringer(v.Type(), v)
+				if err != nil {
+					return err
+				}
+
+				items = append(items, r)
+				return nil
+			}
+
+			f, err := m.marshal(v.Interface())
+			if err != nil {
+				return err
+			}
+
+			flags = append(flags, f...)
+			return nil
 		}
 
-		if b != nil {
-			return fmt.Errorf("unexpected bool")
+		if kind == reflect.String {
+			items = append(items, v.String())
+			return nil
 		}
 
-		items = append(items, *s)
+		if kind == reflect.Bool {
+			return fmt.Errorf("bool slices are not allowed")
+		}
 
-		return nil
+		if kind == reflect.Slice {
+			return fmt.Errorf("slices of slices not allowed")
+		}
+
+		return fmt.Errorf("unexpected kind %s", kind)
 	})
 
 	if err != nil {
 		return nil, err
 	}
 
-	f, err := gfo.newListFlag(items)
+	f, err := m.newListFlag(gfo, name, items)
 	if err != nil {
 		return nil, err
 	}
@@ -338,23 +518,36 @@ func (m marshaler) getFlagSlice(gfo *genFlagOpts, val reflect.Value) ([]Flag, er
 	return append(flags, f...), nil
 }
 
-func (m marshaler) getMapOrSliceElement(val reflect.Value) (*string, *bool, error) {
-	switch val.Kind() {
-	case reflect.String:
-		s := val.String()
-		return &s, nil, nil
-	case reflect.Bool:
-		b := val.Bool()
-		return nil, &b, nil
-	case reflect.Interface:
-		return m.getMapOrSliceElement(reflect.ValueOf(val.Interface()))
-	case reflect.Pointer:
-		return m.getMapOrSliceElement(val.Elem())
-	default:
-		return nil, nil, fmt.Errorf("invalid kind %s", val.Kind())
+// Determines if a given value is actually a nil pointer.
+func (m marshaler) isNilPointer(val reflect.Value) bool {
+	kind := val.Kind()
+
+	if kind != reflect.Pointer && kind != reflect.Ptr {
+		return false
 	}
+
+	return val.IsNil()
 }
 
+// Retrieves a given value, recursing if necessary to both dereference the
+// value if it's a pointer as well as fetch the concrete type if it's an
+// interface.
+func (m marshaler) getValue(val reflect.Value) reflect.Value {
+	kind := val.Kind()
+
+	if kind == reflect.Interface {
+		return m.getValue(reflect.ValueOf(val.Interface()))
+	}
+
+	if kind == reflect.Pointer || kind == reflect.Ptr {
+		return m.getValue(val.Elem())
+	}
+
+	return val
+}
+
+// Iterates through a map and calls the supplied function once for each
+// iteration until the map has been iterated or an error has been returned.
 func (m marshaler) traverseMap(val reflect.Value, f func(reflect.Value, reflect.Value) error) error {
 	iter := val.MapRange()
 
@@ -374,41 +567,21 @@ func (m marshaler) traverseMap(val reflect.Value, f func(reflect.Value, reflect.
 	return nil
 }
 
-func (m marshaler) getFlagsFromStringMap(gfo *genFlagOpts, items map[string]string) ([]Flag, error) {
-	if gfo != nil {
-		return gfo.newKeyValueFlag(items)
-	}
-
-	return NewKeyValueFlags(items)
-}
-
-func (m marshaler) getFlagsFromBoolMap(gfo *genFlagOpts, items map[string]bool) ([]Flag, error) {
-	if gfo != nil {
-		return gfo.newSwitchFlag(items)
-	}
-
-	return NewSwitchFlags(items)
-}
-
-func (m marshaler) getFlagMap(gfo *genFlagOpts, val reflect.Value) ([]Flag, error) {
-	boolMap := map[string]bool{}
-	stringMap := map[string]string{}
-
-	out := []Flag{}
+// Iterates through a map and calls the supplied function once for each
+// iteration until the map has been iterated or an error has been returned. The
+// provided function can return a list of flags which will be combined into a
+// singular list of flags once this function finishes.
+func (m marshaler) traverseMapAndGetFlags(val reflect.Value, f func(reflect.Value, reflect.Value) ([]Flag, error)) ([]Flag, error) {
+	flags := []Flag{}
 
 	err := m.traverseMap(val, func(k, v reflect.Value) error {
-		s, b, err := m.getMapOrSliceElement(v)
+		flagsOut, err := f(k, v)
+
 		if err != nil {
 			return err
 		}
 
-		if s != nil {
-			stringMap[k.String()] = *s
-		}
-
-		if b != nil {
-			boolMap[k.String()] = *b
-		}
+		flags = append(flags, flagsOut...)
 
 		return nil
 	})
@@ -417,33 +590,94 @@ func (m marshaler) getFlagMap(gfo *genFlagOpts, val reflect.Value) ([]Flag, erro
 		return nil, err
 	}
 
-	if len(stringMap) != 0 {
-		f, err := m.getFlagsFromStringMap(gfo, stringMap)
-		if err != nil {
-			return nil, err
-		}
-
-		out = append(out, f...)
-	}
-
-	if len(boolMap) != 0 {
-		f, err := m.getFlagsFromBoolMap(gfo, boolMap)
-		if err != nil {
-			return nil, err
-		}
-
-		out = append(out, f...)
-	}
-
-	return out, nil
+	return flags, nil
 }
 
-func stringMapToSlice(in map[string]struct{}) []string {
-	out := []string{}
+// Marshals a given map into switchFlags or keyValueFlags based upon the
+// underlying type of the map. Also handles maps with pointers to strings and
+// bools as well as map[string]interface{} where all four of those combinations
+// can be present.
+func (m marshaler) marshalMap(gfo *genFlagOpts, val reflect.Value) ([]Flag, error) {
+	boolMap := map[string]bool{}
+	stringMap := map[string]string{}
 
-	for key := range in {
-		out = append(out, key)
+	flags, err := m.traverseMapAndGetFlags(val, func(k, v reflect.Value) ([]Flag, error) {
+		if k.Kind() != reflect.String {
+			return nil, fmt.Errorf("map key is %s, expected string", k.Kind())
+		}
+
+		if m.isNilPointer(v) {
+			return nil, nil
+		}
+
+		strVal := m.getValue(v)
+
+		if m.isStringer(strVal.Type()) {
+			r, err := m.runStringer(strVal.Type(), strVal)
+			if err != nil {
+				return nil, err
+			}
+
+			return m.newStringFlag(gfo, k.String(), r)
+		}
+
+		val := m.getValue(v)
+
+		kind := val.Kind()
+
+		if kind == reflect.Interface {
+			return m.marshal(val.Interface())
+		}
+
+		if kind == reflect.Map {
+			return m.marshal(val.Interface())
+		}
+
+		if kind == reflect.Struct {
+			return m.marshal(val.Interface())
+		}
+
+		if kind == reflect.Slice || kind == reflect.Array {
+			return m.marshalSlice(gfo, k.String(), val)
+		}
+
+		if kind == reflect.String {
+			stringMap[k.String()] = val.String()
+		}
+
+		if kind == reflect.Bool {
+			boolMap[k.String()] = val.Bool()
+		}
+
+		if kind != reflect.String && kind != reflect.Bool {
+			return nil, fmt.Errorf("invalid map value type %q", kind)
+		}
+
+		return nil, nil
+	})
+
+	getCollectedFlags := func() ([]Flag, error) {
+		// While its possible to call the map traversal function directly from here,
+		// it is better that we execute it above and have this closure just return
+		// its values.
+		//
+		// The reason is because getBoolFlags() and getKVFlags() are dependent upon
+		// work done when the map traversal function executes. If that work is not
+		// done before the other two closures are called, there will be no data to
+		// return.
+		//
+		// By calling the map traversal function above and passing its return values
+		// via this closure, we can guarantee that it will execute first.
+		return flags, err
 	}
 
-	return out
+	getBoolFlags := func() ([]Flag, error) {
+		return m.newSwitchFlag(gfo, boolMap)
+	}
+
+	getKVFlags := func() ([]Flag, error) {
+		return m.newKeyValueFlag(gfo, stringMap)
+	}
+
+	return combineFlags(getCollectedFlags, getBoolFlags, getKVFlags)
 }

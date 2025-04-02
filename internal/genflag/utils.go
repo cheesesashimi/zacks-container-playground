@@ -1,54 +1,5 @@
 package genflag
 
-func flagsToString(flags []Flag) ([]string, error) {
-	out := []string{}
-
-	for _, flag := range flags {
-		s, err := flag.String()
-		if err != nil {
-			return nil, err
-		}
-
-		out = append(out, s)
-	}
-
-	return out, nil
-}
-
-func flagsToMap(flags []Flag) (map[string]struct{}, error) {
-	s, err := flagsToString(flags)
-	if err != nil {
-		return nil, err
-	}
-
-	return stringSliceToMap(s), nil
-}
-
-func isStringSliceValuesUnique(slice []string) (bool, []string) {
-	counts := map[string]int{}
-
-	for _, item := range slice {
-		_, ok := counts[item]
-		if ok {
-			counts[item]++
-		} else {
-			counts[item] = 1
-		}
-	}
-
-	multiples := []string{}
-
-	multiplesFound := false
-
-	for key, count := range counts {
-		if count > 1 {
-			multiples = append(multiples, key)
-		}
-	}
-
-	return multiplesFound, multiples
-}
-
 func stringSliceToMap(slice []string) map[string]struct{} {
 	out := map[string]struct{}{}
 
@@ -59,6 +10,38 @@ func stringSliceToMap(slice []string) map[string]struct{} {
 	return out
 }
 
-func toPlural(f Flag, err error) ([]Flag, error) {
-	return []Flag{f}, err
+func stringMapToSlice(in map[string]struct{}) []string {
+	out := []string{}
+
+	for key := range in {
+		out = append(out, key)
+	}
+
+	return out
+}
+
+func boolToPtr(val bool) *bool {
+	return &val
+}
+
+func stringToPtr(s string) *string {
+	return &s
+}
+
+// Variadic helper function for running a series of functions with return
+// flags. This will execute each function, halt on any errors, and combine all
+// of the flags into a singular array.
+func combineFlags(flagFuncs ...func() ([]Flag, error)) ([]Flag, error) {
+	out := []Flag{}
+
+	for _, getFlagFunc := range flagFuncs {
+		f, err := getFlagFunc()
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, f...)
+	}
+
+	return out, nil
 }

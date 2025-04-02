@@ -1,5 +1,11 @@
 package genflag
 
+type FlagContainer interface {
+	SetName(string)
+	SetOptionFuncs([]optionFunc)
+	Flags() ([]Flag, error)
+}
+
 // Each flag implements this interface.
 type Flag interface {
 	// The name of the flag.
@@ -15,6 +21,6 @@ type Flag interface {
 }
 
 // Any type which satisfies this interface will be marshaled.
-type FlagMarshaler interface {
+type FlagMarshaller interface {
 	MarshalFlags() ([]Flag, error)
 }
