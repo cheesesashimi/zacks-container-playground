@@ -6,17 +6,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGenFlagOpts(t *testing.T) {
+func TestGenflagTagParser(t *testing.T) {
 	testCases := []struct {
 		testName    string
 		tagInput    string
 		errExpected bool
-		expected    genFlagOpts
+		expected    genflagTagParser
 	}{
 		{
 			testName: "Just name override",
 			tagInput: "overriddenname",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				name:    "overriddenname",
 				setOpts: getSetOpts([]genflagTagOpt{}),
 			},
@@ -24,14 +24,14 @@ func TestGenFlagOpts(t *testing.T) {
 		{
 			testName: "Keyword only",
 			tagInput: "quoted",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				setOpts: getSetOpts([]genflagTagOpt{genFlagQuoted}),
 			},
 		},
 		{
 			testName: "Override with keyword",
 			tagInput: "newname,single",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				name:    "newname",
 				setOpts: getSetOpts([]genflagTagOpt{genFlagSingleOpt}),
 			},
@@ -39,35 +39,35 @@ func TestGenFlagOpts(t *testing.T) {
 		{
 			testName: "Title casing",
 			tagInput: "titlecase",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				setOpts: getSetOpts([]genflagTagOpt{genFlagExplicitBoolTitleCase}),
 			},
 		},
 		{
 			testName: "Uppercasing",
 			tagInput: "uppercase",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				setOpts: getSetOpts([]genflagTagOpt{genFlagExplicitBoolUppercase}),
 			},
 		},
 		{
 			testName: "Explicit boolean opt",
 			tagInput: "explicit",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				setOpts: getSetOpts([]genflagTagOpt{genFlagExplicitOpt}),
 			},
 		},
 		{
 			testName: "Quoted opt",
 			tagInput: "quoted",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				setOpts: getSetOpts([]genflagTagOpt{genFlagQuoted}),
 			},
 		},
 		{
 			testName: "Quoted opt with quoted override",
 			tagInput: "quoted,quoted",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				name:    "quoted",
 				setOpts: getSetOpts([]genflagTagOpt{genFlagQuoted}),
 			},
@@ -75,7 +75,7 @@ func TestGenFlagOpts(t *testing.T) {
 		{
 			testName: "Multiple keywords set",
 			tagInput: "quoted,explicit,titlecase,single",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				setOpts: getSetOpts([]genflagTagOpt{
 					genFlagQuoted,
 					genFlagExplicitOpt,
@@ -87,7 +87,7 @@ func TestGenFlagOpts(t *testing.T) {
 		{
 			testName: "Multiple keywords set with override",
 			tagInput: "newname,quoted,explicit,titlecase,single",
-			expected: genFlagOpts{
+			expected: genflagTagParser{
 				name: "newname",
 				setOpts: getSetOpts([]genflagTagOpt{
 					genFlagQuoted,
@@ -167,7 +167,7 @@ func TestGenFlagOpts(t *testing.T) {
 				testCase.expected.name = "oldname"
 			}
 
-			gfo, err := newGenFlagOpts(fieldName, testCase.tagInput)
+			gfo, err := newGenflagTagParser(fieldName, testCase.tagInput)
 			if testCase.errExpected {
 				assert.Error(t, err)
 				t.Log(err)
@@ -180,9 +180,9 @@ func TestGenFlagOpts(t *testing.T) {
 	}
 }
 
-func TestGenFlagOptsBoolean(t *testing.T) {
+func TestGenflagTagParserBoolean(t *testing.T) {
 	t.Run("Implicit true", func(t *testing.T) {
-		gfo, err := newGenFlagOpts("switch", "")
+		gfo, err := newGenflagTagParser("switch", "")
 		assert.NoError(t, err)
 
 		f, err := gfo.newBoolFlagWithName(true)
@@ -196,7 +196,7 @@ func TestGenFlagOptsBoolean(t *testing.T) {
 	})
 
 	t.Run("Implicit false", func(t *testing.T) {
-		gfo, err := newGenFlagOpts("switch", "")
+		gfo, err := newGenflagTagParser("switch", "")
 		assert.NoError(t, err)
 
 		f, err := gfo.newBoolFlagWithName(false)
@@ -205,7 +205,8 @@ func TestGenFlagOptsBoolean(t *testing.T) {
 	})
 
 	t.Run("Explicit true", func(t *testing.T) {
-		gfo, err := newGenFlagOpts("switch", "explicit")
+		gfo, err := newGenflagTagParser("switch", "explicit")
+		assert.NoError(t, err)
 
 		f, err := gfo.newBoolFlagWithName(true)
 		assert.NoError(t, err)
@@ -218,7 +219,8 @@ func TestGenFlagOptsBoolean(t *testing.T) {
 	})
 
 	t.Run("Explicit false", func(t *testing.T) {
-		gfo, err := newGenFlagOpts("switch", "explicit")
+		gfo, err := newGenflagTagParser("switch", "explicit")
+		assert.NoError(t, err)
 
 		f, err := gfo.newBoolFlagWithName(false)
 		assert.NoError(t, err)

@@ -1,16 +1,10 @@
 package genflag
 
-import "fmt"
+import (
+	"fmt"
 
-type listFlagContainer struct {
-	name        string
-	values      []string
-	optionFuncs []optionFunc
-}
-
-func (l listFlagContainer) Flags() ([]Flag, error) {
-	return NewListFlags(l.name, l.values, l.optionFuncs...)
-}
+	mapset "github.com/deckarep/golang-set/v2"
+)
 
 // A listflag is just a type alias for string flags. The difference is that the
 // factory which produces these assumes the same name for the flag, but
@@ -32,14 +26,14 @@ func newListFlag(name, value string, optionFuncs ...optionFunc) (listFlag, error
 func NewListFlags(name string, values []string, optionFuncs ...optionFunc) ([]Flag, error) {
 	out := []Flag{}
 
-	seen := map[string]struct{}{}
+	seen := mapset.NewSet[string]()
 
 	for _, value := range values {
-		if _, ok := seen[value]; ok {
+		if seen.Contains(value) {
 			return nil, fmt.Errorf("values must be unique, found %q more than once", value)
 		}
 
-		seen[value] = struct{}{}
+		seen.Add(value)
 
 		f, err := newListFlag(name, value, optionFuncs...)
 		if err != nil {

@@ -21,6 +21,11 @@ type Flag interface {
 }
 
 // Any type which satisfies this interface will be marshaled.
-type FlagMarshaller interface {
+type Marshaler interface {
 	MarshalFlags() ([]Flag, error)
+}
+
+// A simple stringer interface reference.
+type stringer interface {
+	String() string
 }

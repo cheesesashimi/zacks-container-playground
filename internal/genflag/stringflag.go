@@ -36,7 +36,7 @@ func newStringFlag(name, value string, optionFuncs ...optionFunc) (stringFlag, e
 		return sf, err
 	}
 
-	if err := sf.flagOpts.validate(value); err != nil {
+	if err := sf.validate(value); err != nil {
 		return sf, err
 	}
 
@@ -56,11 +56,11 @@ func (s stringFlag) Value() string {
 // Returns a rendered string of the flag as well as any rendering
 // or validation errors.
 func (s stringFlag) String() (string, error) {
-	return s.flagOpts.render(s.name, s.value)
+	return s.render(s.name, s.value)
 }
 
 // Returns a segmented representation of the flag as well as any
 // rendering or validation errors.
 func (s stringFlag) Segmented() ([]string, error) {
-	return s.flagOpts.renderSegmented(s.name, s.value)
+	return s.renderSegmented(s.name, s.value)
 }

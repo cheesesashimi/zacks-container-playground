@@ -3,11 +3,14 @@ package genflag
 import (
 	"fmt"
 	"reflect"
+	"strings"
+
+	mapset "github.com/deckarep/golang-set/v2"
 )
 
 // Marshals the given interface into a list of validated flags,
 // halting on any errors.
-func MarshalFlags(in interface{}) ([]Flag, error) {
+func Marshal(in interface{}) ([]Flag, error) {
 	m := marshaler{}
 
 	flags, err := m.marshal(in)
@@ -32,9 +35,9 @@ type marshaler struct{}
 // occurs.
 // 2. Values can be different amongst different flags.
 func (m marshaler) validateFlagList(flags []Flag) error {
-	seenCombined := map[string]struct{}{}
-	seenBooleanFlags := map[string]struct{}{}
-	seenStringFlags := map[string]struct{}{}
+	seenCombined := mapset.NewSet[string]()
+	seenBool := mapset.NewSet[string]()
+	seenString := mapset.NewSet[string]()
 
 	for _, flag := range flags {
 		name := flag.Name()
@@ -59,32 +62,28 @@ func (m marshaler) validateFlagList(flags []Flag) error {
 			val = flag.Value()
 		}
 
-		_, seenBoolOK := seenBooleanFlags[name]
-		_, seenStringOK := seenStringFlags[name]
-
 		if isBoolFlag {
-			if seenStringOK {
+			if seenString.Contains(name) {
 				return fmt.Errorf("flag name collision")
 			}
 
-			if !seenBoolOK {
-				seenBooleanFlags[name] = struct{}{}
+			if !seenBool.Contains(name) {
+				seenBool.Add(name)
 			}
 		} else {
-			if seenBoolOK {
+			if seenBool.Contains(name) {
 				return fmt.Errorf("flag name collision")
 			}
 		}
 
-		if !seenStringOK {
-			seenStringFlags[name] = struct{}{}
+		if !seenString.Contains(name) {
+			seenString.Add(name)
 		}
 
 		key := fmt.Sprintf("%s/%s", name, val)
 
-		_, ok := seenCombined[key]
-		if !ok {
-			seenCombined[key] = struct{}{}
+		if !seenCombined.Contains(key) {
+			seenCombined.Add(key)
 		} else {
 			return fmt.Errorf("flags cannot have the same name / value, found: %q", key)
 		}
@@ -107,10 +106,10 @@ func (m marshaler) marshal(in interface{}) ([]Flag, error) {
 		typ = typ.Elem()
 	}
 
-	// If our input implements the FlagMarshaller interface, call it and return
+	// If our input implements the Marshaler interface, call it and return
 	// the results.
-	if m.isFlagMarshaller(typ) {
-		return m.runFlagMarshaller(typ, val)
+	if m.isMarshaler(typ) {
+		return m.runMarshaler(typ, val)
 	}
 
 	kind := typ.Kind()
@@ -152,21 +151,19 @@ func (m marshaler) marshalStructFields(typ reflect.Type, val reflect.Value) ([]F
 	return cliflags, nil
 }
 
-// Determines if a given type implements the FlagMarshaller interface.
-func (m marshaler) isFlagMarshaller(typ reflect.Type) bool {
-	interfaceType := reflect.TypeOf((*FlagMarshaller)(nil)).Elem()
+// Determines if a given type implements the Marshaler interface.
+func (m marshaler) isMarshaler(typ reflect.Type) bool {
+	interfaceType := reflect.TypeOf((*Marshaler)(nil)).Elem()
 	return typ.Implements(interfaceType)
 }
 
-type stringer interface {
-	String() string
-}
-
+// Determines if a given type implements the Stringer interface.
 func (m marshaler) isStringer(typ reflect.Type) bool {
 	interfaceType := reflect.TypeOf((*stringer)(nil)).Elem()
 	return typ.Implements(interfaceType)
 }
 
+// Calls the Stringer interface on a given type, if it implements it.
 func (m marshaler) runStringer(typ reflect.Type, val reflect.Value) (string, error) {
 	if !m.isStringer(typ) {
 		return "", fmt.Errorf("does not implement stringer")
@@ -187,11 +184,11 @@ func (m marshaler) runStringer(typ reflect.Type, val reflect.Value) (string, err
 	return "", fmt.Errorf("a problem occured while calling String()")
 }
 
-// Calls the FlagMarshaller interface on a given type, if it
+// Calls the Marshaler interface on a given type, if it
 // implements it.
-func (m marshaler) runFlagMarshaller(typ reflect.Type, val reflect.Value) ([]Flag, error) {
-	if !m.isFlagMarshaller(typ) {
-		return nil, fmt.Errorf("does not implement FlagMarshaller")
+func (m marshaler) runMarshaler(typ reflect.Type, val reflect.Value) ([]Flag, error) {
+	if !m.isMarshaler(typ) {
+		return nil, fmt.Errorf("does not implement Marshaler")
 	}
 
 	methodValue := val.MethodByName("MarshalFlags")
@@ -237,12 +234,12 @@ func (m marshaler) marshalStructField(field reflect.StructField, val reflect.Val
 }
 
 // Handles untagged struct fields as well as discovering whether a given struct
-// implements FlagMarshaller.
+// implements Marshaler.
 func (m marshaler) marshalUntaggedStructField(field reflect.StructField, val reflect.Value, kind reflect.Kind) ([]Flag, error) {
-	// If the field's concrete tyoe implements FlagMarshaller, call
+	// If the field's concrete tyoe implements Marshaler, call
 	// it directly and return the results.
-	if m.isFlagMarshaller(val.Type()) {
-		return m.runFlagMarshaller(val.Type(), val)
+	if m.isMarshaler(val.Type()) {
+		return m.runMarshaler(val.Type(), val)
 		// return m.marshal(val.Interface())
 	}
 
@@ -253,27 +250,11 @@ func (m marshaler) marshalUntaggedStructField(field reflect.StructField, val ref
 		return m.marshal(val.Interface())
 	}
 
-	if (kind == reflect.Slice || kind == reflect.Array || kind == reflect.Map) && m.isFlagMarshaller(val.Type().Elem()) {
+	if (kind == reflect.Slice || kind == reflect.Array || kind == reflect.Map) && m.isMarshaler(val.Type().Elem()) {
 		return m.marshal(val.Interface())
 	}
 
 	return nil, nil
-}
-
-func (m marshaler) getFlagsFromFlagMarshallerSlice(val reflect.Value) ([]Flag, error) {
-	flags := []Flag{}
-	err := m.traverseSlice(val, func(v reflect.Value) error {
-		f, err := m.marshal(v.Interface())
-		if err != nil {
-			return err
-		}
-
-		flags = append(flags, f...)
-
-		return nil
-	})
-
-	return flags, err
 }
 
 // Handles the tagged struct fields.
@@ -283,7 +264,7 @@ func (m marshaler) marshalTaggedStructField(field reflect.StructField, val refle
 		return nil, nil
 	}
 
-	gfo, err := newGenFlagOpts(field.Name, tagContents)
+	gfo, err := newGenflagTagParser(field.Name, tagContents)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +273,7 @@ func (m marshaler) marshalTaggedStructField(field reflect.StructField, val refle
 		return nil, fmt.Errorf("cannot reflect from unexported field")
 	}
 
-	if m.isStringer(val.Type()) {
+	if m.isStringer(val.Type()) && !val.IsZero() {
 		r, err := m.runStringer(val.Type(), val)
 		if err != nil {
 			return nil, err
@@ -301,11 +282,11 @@ func (m marshaler) marshalTaggedStructField(field reflect.StructField, val refle
 		return gfo.newStringFlagWithName(r)
 	}
 
-	if kind == reflect.Struct {
+	if kind == reflect.Struct || kind == reflect.Interface {
 		return m.marshal(val.Interface())
 	}
 
-	if kind == reflect.String && val.String() != "" {
+	if kind == reflect.String && !isEmptyString(val.String()) {
 		return gfo.newStringFlagWithName(val.String())
 	}
 
@@ -314,7 +295,6 @@ func (m marshaler) marshalTaggedStructField(field reflect.StructField, val refle
 	}
 
 	if kind == reflect.Map {
-
 		return m.marshalMap(gfo, val)
 	}
 
@@ -322,40 +302,12 @@ func (m marshaler) marshalTaggedStructField(field reflect.StructField, val refle
 		return m.marshalSlice(gfo, "", val)
 	}
 
-	if kind == reflect.Interface {
-		return m.marshal(val.Interface())
-	}
-
 	return nil, nil
 }
 
-// Retrieves the string slice values from a given struct field.
-func (m marshaler) fetchStringSliceValues(val reflect.Value) ([]string, error) {
-	items := []string{}
-
-	for i := 0; i < val.Len(); i++ {
-		sliceVal := val.Index(i)
-		if m.isNilPointer(sliceVal) {
-			continue
-		}
-
-		sliceVal = m.getValue(sliceVal)
-
-		kind := sliceVal.Kind()
-
-		if kind != reflect.String {
-			return nil, fmt.Errorf("unsupported slice kind %s", kind)
-		}
-
-		items = append(items, sliceVal.String())
-	}
-
-	return items, nil
-}
-
-func (m marshaler) newStringFlag(gfo *genFlagOpts, name, value string) ([]Flag, error) {
+func (m marshaler) newStringFlag(gfo *genflagTagParser, name, value string) ([]Flag, error) {
 	if gfo == nil && name == "" {
-		return nil, fmt.Errorf("when genFlagOpts is not passed, a name is required")
+		return nil, fmt.Errorf("when genflagTagParser is not passed, a name is required")
 	}
 
 	if gfo != nil {
@@ -371,24 +323,24 @@ func (m marshaler) newStringFlag(gfo *genFlagOpts, name, value string) ([]Flag, 
 }
 
 // Fetches the string slice values from a given struct field and passes them
-// into the listflag constructor either by passing them through genFlagOpts to
+// into the listflag constructor either by passing them through genflagTagParser to
 // get the field name and optionFuncs or by calling the constructor directly.
-func (m marshaler) newListFlag(gfo *genFlagOpts, name string, items []string) ([]Flag, error) {
+func (m marshaler) newListFlag(gfo *genflagTagParser, name string, items []string) ([]Flag, error) {
 	if gfo != nil {
 		return gfo.newListFlag(items)
 	}
 
 	if gfo == nil && name == "" {
-		return nil, fmt.Errorf("when genFlagOpts is not passed, a name is required")
+		return nil, fmt.Errorf("when genflagTagParser is not passed, a name is required")
 	}
 
 	return NewListFlags(name, items)
 }
 
 // Passes the provided string map into the NewKeyValueFlags constructor either
-// by passing them through genFlagOpts to get the field name and optionFuncs or
+// by passing them through genflagTagParser to get the field name and optionFuncs or
 // by calling the constructor directly.
-func (m marshaler) newKeyValueFlag(gfo *genFlagOpts, vals map[string]string) ([]Flag, error) {
+func (m marshaler) newKeyValueFlag(gfo *genflagTagParser, vals map[string]string) ([]Flag, error) {
 	if gfo != nil {
 		return gfo.newKeyValueFlag(vals)
 	}
@@ -397,9 +349,9 @@ func (m marshaler) newKeyValueFlag(gfo *genFlagOpts, vals map[string]string) ([]
 }
 
 // Passes the provided string map into the NewSwitchFlag constructor either by
-// passing them through genFlagOpts to get the field name and optionFuncs or by
+// passing them through genflagTagParser to get the field name and optionFuncs or by
 // calling the constructor directly.
-func (m marshaler) newSwitchFlag(gfo *genFlagOpts, vals map[string]bool) ([]Flag, error) {
+func (m marshaler) newSwitchFlag(gfo *genflagTagParser, vals map[string]bool) ([]Flag, error) {
 	if gfo != nil {
 		return gfo.newSwitchFlag(vals)
 	}
@@ -407,30 +359,31 @@ func (m marshaler) newSwitchFlag(gfo *genFlagOpts, vals map[string]bool) ([]Flag
 	return NewSwitchFlags(vals)
 }
 
+// Handles top-level slices.
 func (m marshaler) marshalTopLevelSlice(val reflect.Value) ([]Flag, error) {
 	elemType := val.Type().Elem()
 	elemKind := elemType.Kind()
 
-	kinds := map[reflect.Kind]struct{}{
-		reflect.Struct:    struct{}{},
-		reflect.Interface: struct{}{},
-		reflect.Pointer:   struct{}{},
-	}
+	kinds := mapset.NewSet[reflect.Kind](reflect.Struct, reflect.Interface, reflect.Pointer)
 
-	if _, ok := kinds[elemKind]; !ok {
+	if !kinds.Contains(elemKind) {
 		return nil, fmt.Errorf("slices of %s not supported at top-level", elemKind)
 	}
 
 	flags := []Flag{}
 
-	for i := 0; i < val.Len(); i++ {
-		sliceVal := m.getValue(val.Index(i))
-		f, err := m.marshal(sliceVal.Interface())
+	err := m.traverseSlice(val, func(v reflect.Value) error {
+		f, err := m.marshal(v.Interface())
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		flags = append(flags, f...)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	return flags, nil
@@ -447,23 +400,13 @@ func (m marshaler) traverseSlice(val reflect.Value, f func(reflect.Value) error)
 }
 
 // Converts a slice into flags.
-func (m marshaler) marshalSlice(gfo *genFlagOpts, name string, val reflect.Value) ([]Flag, error) {
+func (m marshaler) marshalSlice(gfo *genflagTagParser, name string, val reflect.Value) ([]Flag, error) {
 	flags := []Flag{}
 
 	items := []string{}
 
 	err := m.traverseSlice(val, func(v reflect.Value) error {
 		if m.isNilPointer(v) {
-			return nil
-		}
-
-		if m.isStringer(v.Type()) {
-			r, err := m.runStringer(v.Type(), v)
-			if err != nil {
-				return err
-			}
-
-			items = append(items, r)
 			return nil
 		}
 
@@ -597,7 +540,7 @@ func (m marshaler) traverseMapAndGetFlags(val reflect.Value, f func(reflect.Valu
 // underlying type of the map. Also handles maps with pointers to strings and
 // bools as well as map[string]interface{} where all four of those combinations
 // can be present.
-func (m marshaler) marshalMap(gfo *genFlagOpts, val reflect.Value) ([]Flag, error) {
+func (m marshaler) marshalMap(gfo *genflagTagParser, val reflect.Value) ([]Flag, error) {
 	boolMap := map[string]bool{}
 	stringMap := map[string]string{}
 
@@ -625,15 +568,7 @@ func (m marshaler) marshalMap(gfo *genFlagOpts, val reflect.Value) ([]Flag, erro
 
 		kind := val.Kind()
 
-		if kind == reflect.Interface {
-			return m.marshal(val.Interface())
-		}
-
-		if kind == reflect.Map {
-			return m.marshal(val.Interface())
-		}
-
-		if kind == reflect.Struct {
+		if kind == reflect.Interface || kind == reflect.Map || kind == reflect.Struct {
 			return m.marshal(val.Interface())
 		}
 
@@ -680,4 +615,20 @@ func (m marshaler) marshalMap(gfo *genFlagOpts, val reflect.Value) ([]Flag, erro
 	}
 
 	return combineFlags(getCollectedFlags, getBoolFlags, getKVFlags)
+}
+
+func isEmptyString(in string) bool {
+	if in == "" {
+		return true
+	}
+
+	if in == " " {
+		return true
+	}
+
+	if in == strings.Repeat(" ", len(in)) {
+		return true
+	}
+
+	return false
 }

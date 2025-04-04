@@ -1,4 +1,4 @@
-package genflag
+package examples
 
 import (
 	"testing"

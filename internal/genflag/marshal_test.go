@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -32,8 +33,8 @@ func TestMarshalFlags(t *testing.T) {
 				SingleQuoted         string `genflag:"quoted,single"`
 				MapIgnored           map[string]string
 				SliceIgnored         []string
-				CustomMarshalerMap   map[string]FlagMarshaller
-				CustomSlice          []FlagMarshaller
+				CustomMarshalerMap   map[string]Marshaler
+				CustomSlice          []Marshaler
 				StringerSlice        []stringer          `genflag:""`
 				StringerMap          map[string]stringer `genflag:""`
 				IgnoredStringerSlice []stringer
@@ -52,11 +53,11 @@ func TestMarshalFlags(t *testing.T) {
 				SliceIgnored: []string{
 					"i should be ignored",
 				},
-				CustomMarshalerMap: map[string]FlagMarshaller{
+				CustomMarshalerMap: map[string]Marshaler{
 					"arg1": newCustomMarshaler("arg", "val"),
 					"arg2": newCustomMarshaler("anotherarg", "anotherval"),
 				},
-				CustomSlice: []FlagMarshaller{
+				CustomSlice: []Marshaler{
 					newCustomMarshaler("customarg", "customval"),
 				},
 				StringerSlice: []stringer{
@@ -177,8 +178,8 @@ func TestMarshalFlags(t *testing.T) {
 			},
 		},
 		{
-			name: "Top level FlagMarshaller map",
-			input: map[string]FlagMarshaller{
+			name: "Top level Marshaler map",
+			input: map[string]Marshaler{
 				// If one is providing the custom marshaler, one should
 				// also provide the name.
 				"mapval1": newCustomMarshaler("arg1", "value1"),
@@ -190,8 +191,8 @@ func TestMarshalFlags(t *testing.T) {
 			},
 		},
 		{
-			name: "Top level FlagMarshaller slice",
-			input: []FlagMarshaller{
+			name: "Top level Marshaler slice",
+			input: []Marshaler{
 				newCustomMarshaler("arg1", "value1"),
 				newCustomMarshaler("arg2", "value2"),
 			},
@@ -856,7 +857,7 @@ func TestMarshalFlags(t *testing.T) {
 		}
 
 		t.Run(testCase.name, func(t *testing.T) {
-			results, err := MarshalFlags(testCase.input)
+			results, err := Marshal(testCase.input)
 
 			if testCase.errExpected {
 				assert.Error(t, err)
@@ -870,17 +871,13 @@ func TestMarshalFlags(t *testing.T) {
 
 			assert.NoError(t, err)
 
-			actual := []string{}
-			for _, result := range results {
-				flag, err := result.String()
-				assert.NoError(t, err)
-				actual = append(actual, flag)
-			}
+			actual, err := flagsToStrings(results)
+			assert.NoError(t, err)
 
 			if testCase.matchOrder {
 				assert.Equal(t, testCase.expectedFlags, actual)
 			} else {
-				assert.Equal(t, stringSliceToMap(testCase.expectedFlags), stringSliceToMap(actual))
+				assert.Equal(t, mapset.NewSet[string](testCase.expectedFlags...), mapset.NewSet[string](actual...))
 			}
 		})
 	}

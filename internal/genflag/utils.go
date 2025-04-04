@@ -1,23 +1,17 @@
 package genflag
 
-func stringSliceToMap(slice []string) map[string]struct{} {
-	out := map[string]struct{}{}
-
-	for _, item := range slice {
-		out[item] = struct{}{}
-	}
-
-	return out
-}
-
-func stringMapToSlice(in map[string]struct{}) []string {
+func flagsToStrings(flags []Flag) ([]string, error) {
 	out := []string{}
+	for _, flag := range flags {
+		s, err := flag.String()
+		if err != nil {
+			return nil, err
+		}
 
-	for key := range in {
-		out = append(out, key)
+		out = append(out, s)
 	}
 
-	return out
+	return out, nil
 }
 
 func boolToPtr(val bool) *bool {

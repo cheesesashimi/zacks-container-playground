@@ -3,6 +3,8 @@ package genflag
 import (
 	"fmt"
 	"strings"
+
+	mapset "github.com/deckarep/golang-set/v2"
 )
 
 type genflagTagOpt string
@@ -18,7 +20,7 @@ const (
 )
 
 // Implements a parser for the genflag struct tags.
-type genFlagOpts struct {
+type genflagTagParser struct {
 	// The name of the struct field. For example:
 	// type astruct struct {
 	//     FieldName string `genflag:""`
@@ -30,10 +32,10 @@ type genFlagOpts struct {
 	setOpts map[genflagTagOpt]bool
 }
 
-// Constructs a new genFlagOpts instance, validating what options are set in
+// Constructs a new genflagTagParser instance, validating what options are set in
 // the process.
-func newGenFlagOpts(fieldName, in string) (*genFlagOpts, error) {
-	g := &genFlagOpts{
+func newGenflagTagParser(fieldName, in string) (*genflagTagParser, error) {
+	g := &genflagTagParser{
 		name:    strings.ToLower(fieldName),
 		setOpts: getSetOpts([]genflagTagOpt{}),
 	}
@@ -44,7 +46,7 @@ func newGenFlagOpts(fieldName, in string) (*genFlagOpts, error) {
 
 	split := strings.Split(in, ",")
 
-	invalid := map[string]struct{}{}
+	invalid := mapset.NewSet[string]()
 
 	for _, item := range split {
 		if item == "" || item == " " || strings.Contains(item, " ") {
@@ -54,12 +56,12 @@ func newGenFlagOpts(fieldName, in string) (*genFlagOpts, error) {
 		isSet, ok := g.setOpts[genflagTagOpt(item)]
 		if ok {
 			if isSet {
-				invalid[item] = struct{}{}
+				invalid.Add(item)
 			} else {
 				g.setOpts[genflagTagOpt(item)] = true
 			}
 		} else {
-			invalid[item] = struct{}{}
+			invalid.Add(item)
 		}
 	}
 
@@ -67,15 +69,15 @@ func newGenFlagOpts(fieldName, in string) (*genFlagOpts, error) {
 		return nil, fmt.Errorf("only one of %v may be used, not both", []genflagTagOpt{genFlagExplicitBoolUppercase, genFlagExplicitBoolTitleCase})
 	}
 
-	if len(invalid) == 0 {
+	if invalid.Cardinality() == 0 {
 		return g, nil
 	}
 
-	invalidKeywords := stringMapToSlice(invalid)
+	invalidKeywords := invalid.ToSlice()
 
 	// If there is only one "invalid" keyword and it is found in the first
 	// position, this should be used as the name override for the field name.
-	if len(invalid) == 1 && invalidKeywords[0] == split[0] {
+	if invalid.Cardinality() == 1 && invalidKeywords[0] == split[0] {
 		g.name = invalidKeywords[0]
 		return g, nil
 	}
@@ -84,7 +86,7 @@ func newGenFlagOpts(fieldName, in string) (*genFlagOpts, error) {
 }
 
 // Gets all of the optionFuncs that correspond to the matching keywords.
-func (g *genFlagOpts) getOptionFuncs() []optionFunc {
+func (g *genflagTagParser) getOptionFuncs() []optionFunc {
 	setOpt := []genflagTagOpt{}
 
 	for opt, isSet := range g.setOpts {
@@ -98,17 +100,17 @@ func (g *genFlagOpts) getOptionFuncs() []optionFunc {
 
 // Constructs a new string flag with the given value, optionfuncs, and either
 // the field name or the overridden name.
-func (g *genFlagOpts) newStringFlagWithName(val string) ([]Flag, error) {
+func (g *genflagTagParser) newStringFlagWithName(val string) ([]Flag, error) {
 	return g.newStringFlag(g.name, val)
 }
 
-func (g *genFlagOpts) newStringFlag(name, val string) ([]Flag, error) {
+func (g *genflagTagParser) newStringFlag(name, val string) ([]Flag, error) {
 	return g.toPlural(NewStringFlag(name, val, g.getOptionFuncs()...))
 }
 
 // Constructs a new boolean flag with the given value, optionfuncs, and either
 // the field name or the overridden name.
-func (g *genFlagOpts) newBoolFlagWithName(val bool) ([]Flag, error) {
+func (g *genflagTagParser) newBoolFlagWithName(val bool) ([]Flag, error) {
 	// If the explciit option is enabled, return the boolflag regardless of its
 	// value.
 	if g.setOpts[genFlagExplicitOpt] {
@@ -124,23 +126,23 @@ func (g *genFlagOpts) newBoolFlagWithName(val bool) ([]Flag, error) {
 	return nil, nil
 }
 
-func (g *genFlagOpts) toPlural(f Flag, err error) ([]Flag, error) {
+func (g *genflagTagParser) toPlural(f Flag, err error) ([]Flag, error) {
 	return []Flag{f}, err
 }
 
 // Constructs list flags with the given values, optionfuncs, and either the
 // field name or the overridden name.
-func (g *genFlagOpts) newListFlag(values []string) ([]Flag, error) {
+func (g *genflagTagParser) newListFlag(values []string) ([]Flag, error) {
 	return NewListFlags(g.name, values, g.getOptionFuncs()...)
 }
 
 // Constructs key/value flags with the given keys / values and optionfuncs.
-func (g *genFlagOpts) newKeyValueFlag(items map[string]string) ([]Flag, error) {
+func (g *genflagTagParser) newKeyValueFlag(items map[string]string) ([]Flag, error) {
 	return NewKeyValueFlags(items, g.getOptionFuncs()...)
 }
 
 // Constructs switch flags with the given keys / values and optionfuncs.
-func (g *genFlagOpts) newSwitchFlag(items map[string]bool) ([]Flag, error) {
+func (g *genflagTagParser) newSwitchFlag(items map[string]bool) ([]Flag, error) {
 	return NewSwitchFlags(items, g.getOptionFuncs()...)
 }
 

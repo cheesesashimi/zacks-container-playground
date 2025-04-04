@@ -3,6 +3,9 @@ package genflag
 import (
 	"fmt"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // Represents the type of flgas which may utilize optionFuncs for
@@ -77,7 +80,11 @@ func Uppercase(f internalFlag) error {
 
 // When active, forces a boolean flag's value to exlicitly say True or False.
 func Title(f internalFlag) error {
-	return boolOptionFunc(strings.Title)(f)
+	title := func(in string) string {
+		return cases.Title(language.Und, cases.NoLower).String(in)
+	}
+
+	return boolOptionFunc(title)(f)
 }
 
 // Ensures that a given transformer function can only be applied to a boolean
@@ -104,15 +111,4 @@ func applyOptionFuncs(f internalFlag, optionFuncs ...optionFunc) error {
 	}
 
 	return nil
-}
-
-// Constructs a flagOpts struct from the given optionFuncs.
-func flagOptsFromOptionFuncs(optionFuncs ...optionFunc) (flagOpts, error) {
-	sf := stringFlag{}
-
-	if err := applyOptionFuncs(&sf, optionFuncs...); err != nil {
-		return sf.flagOpts, err
-	}
-
-	return sf.flagOpts, nil
 }
